@@ -1,0 +1,79 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    # Not published to the host by default -- only the two proxies talk to
+    # it, over the Compose-internal network (service name "backend" resolves
+    # there automatically). Uncomment the ports block below only for direct
+    # debugging access, per Edward's "reachable directly for now, lock down
+    # later" preference from the architecture decisions.
+    # ports:
+    #   - "127.0.0.1:8000:8000"
+    volumes:
+      # Replace with the path to the real photo library on the host.
+      - ${PHOTOSHARE_PHOTOS_ROOT:-./sample_photos}:/photos_root:ro
+      # Persistent cache/metadata (SQLite) and rescan logs, as host paths
+      # rather than Docker-managed named volumes -- easier to inspect,
+      # back up, and relocate. Defaults are relative to this compose file
+      # if left unset in .env; the backend runs as uid 1000, so make sure
+      # that uid has write access to whatever real path you set.
+      - ${PHOTOSHARE_CACHE_ROOT:-./cache}:/var/lib/photoshare/cache
+      - ${PHOTOSHARE_LOG_ROOT:-./logs}:/var/log/photoshare
+    environment:
+      - PHOTOSHARE_SERVER__WORKERS=2
+      # PHOTOSHARE_SERVER__CORS_ALLOWED_ORIGINS is intentionally left unset:
+      # only the two proxy containers ever call the backend directly, over
+      # the internal Compose network, not a browser -- so backend-level CORS
+      # doesn't apply here. Both proxies set their own CORS_ORIGINS below,
+      # since browsers call the proxies, not the backend.
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v2/admin/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  data-proxy:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
+    ports:
+      - "8100:8100"
+    environment:
+      - GALLERY_PROXY_API_KEY=${GALLERY_PROXY_API_KEY:?set GALLERY_PROXY_API_KEY in .env -- see deployment/README.md}
+      - GALLERY_PROXY_BASE_URL=http://backend:8000
+      - GALLERY_PROXY_CORS_ORIGINS=${GALLERY_PROXY_CORS_ORIGINS:-}
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/gallery/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  admin-proxy:
+    build:
+      context: ./admin-proxy
+      dockerfile: Dockerfile
+    ports:
+      - "8200:8200"
+    environment:
+      - ADMIN_PROXY_API_KEY=${ADMIN_PROXY_API_KEY:?set ADMIN_PROXY_API_KEY in .env -- see deployment/README.md}
+      - ADMIN_PROXY_BASE_URL=http://backend:8000
+      - ADMIN_PROXY_CORS_ORIGINS=${ADMIN_PROXY_CORS_ORIGINS:-}
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/admin-proxy-health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+

@@ -1,0 +1,1 @@
+"""Admin CLI (manage.py)."""

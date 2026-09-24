@@ -1,0 +1,55 @@
+# PhotoShare production configuration template.
+# Run with: python -m photoshare --config config.prod.yaml
+# Override any value at deploy time with PHOTOSHARE_-prefixed env vars,
+# e.g. PHOTOSHARE_STORAGE__BASE_ROOT=/mnt/photos (double underscore nests).
+
+# Expose base_root and cache_root/thumbnails via unauthenticated static
+# mounts (/static-photos, /static-thumbs) for direct <img src> embedding.
+# Default false. Enabling it makes any image/thumbnail fetchable with no
+# X-API-Key -- an explicit opt-in security tradeoff. Leave false unless the
+# deployment genuinely needs unauthenticated static embedding.
+enable_static_file_serving: false
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  cors_allowed_origins: []
+
+storage:
+  base_root: "/photos_root"
+  allowed_extensions: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic"]
+
+cache:
+  cache_root: "/var/lib/photoshare/cache"
+  thumbnail_sizes:
+    - [320, 240]
+    - [800, 600]
+  default_static_thumbnail_size: [320, 240]
+  default_static_icon_size: [320, 240]
+  tile_threshold_px:
+    width: 4000
+    height: 3000
+
+database:
+  busy_timeout_ms: 5000
+  wal_autocheckpoint_pages: 1000
+
+auth:
+  scheme: "api_key"
+  api_key_header: "X-API-Key"
+  key_expiry_days: 365
+
+rate_limiting:
+  read_requests_per_minute: 100
+  admin_requests_per_minute: 10
+
+rescan:
+  on_startup: true
+  watch_filesystem: false
+  # MUST remain true in production (§2.1 mandates cycle detection).
+  cycle_detection: true
+
+logging:
+  level: "INFO"
+  rescan_log_path: "/var/log/photoshare/rescan_history.jsonl"

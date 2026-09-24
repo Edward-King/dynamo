@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+dev_cache/
+logs/
+*.db
+installation.json
+.coverage
+.git/
+sample_photos/
+tests/

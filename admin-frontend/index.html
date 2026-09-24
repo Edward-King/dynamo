@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PhotoShare Admin</title>
+<style>
+  :root {
+    --bg: #16181c;
+    --panel: #1f2227;
+    --border: #2c3038;
+    --text: #e6e8eb;
+    --muted: #9aa1ab;
+    --accent: #4f8cff;
+    --danger: #e05d5d;
+    --ok: #4caf7d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+  header .badge {
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  #backendStatus.ok { color: var(--ok); border-color: var(--ok); }
+  #backendStatus.error { color: var(--danger); border-color: var(--danger); }
+  main {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 24px;
+    display: grid;
+    gap: 20px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+  }
+  .card h2 {
+    margin: 0 0 4px;
+    font-size: 1.05rem;
+  }
+  .card p.desc {
+    margin: 0 0 16px;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.4;
+  }
+  .card.danger { border-color: rgba(224, 93, 93, 0.4); }
+  form {
+    display: grid;
+    gap: 12px;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+  }
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  input[type="text"], input[type="number"] {
+    background: #14161a;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.95rem;
+  }
+  label.checkbox {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    color: var(--text);
+  }
+  button {
+    justify-self: start;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 18px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .card.danger button { background: var(--danger); }
+  .result {
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 6px;
+    background: #14161a;
+    border: 1px solid var(--border);
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    display: none;
+  }
+  .result.show { display: block; }
+  .result.error { border-color: var(--danger); color: #f2b0b0; }
+  .result.success { border-color: var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>PhotoShare Admin</h1>
+  <span id="backendStatus" class="badge">checking backend&hellip;</span>
+</header>
+
+<main>
+
+  <section class="card">
+    <h2>Trigger rescan</h2>
+    <p class="desc">
+      Reconciles the metadata registry against the real photo tree on disk.
+      Runs synchronously on the backend, so this may take a while on a large
+      library &mdash; leave the tab open until a result appears below.
+    </p>
+    <form id="rescanForm">
+      <div class="row">
+        <label>Portfolio UUID (optional &mdash; blank = whole tree)
+          <input type="text" id="rescanPortUuid" placeholder="leave blank for full rescan" />
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" id="rescanRecursive" checked />
+          Recursive
+        </label>
+      </div>
+      <button type="submit">Run rescan</button>
+    </form>
+    <div class="result" id="rescanResult"></div>
+  </section>
+
+  <section class="card">
+    <h2>Preheat thumbnails</h2>
+    <p class="desc">
+      Force-generates thumbnails ahead of time for a portfolio (and its
+      subtree, if recursive) at the given size, so visitors don't wait for
+      on-demand generation.
+    </p>
+    <form id="preheatForm">
+      <div class="row">
+        <label>Portfolio UUID (optional &mdash; blank = whole tree)
+          <input type="text" id="preheatPortUuid" placeholder="leave blank for full tree" />
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" id="preheatRecursive" checked />
+          Recursive
+        </label>
+      </div>
+      <div class="row">
+        <label>Width
+          <input type="number" id="preheatWidth" value="320" min="16" max="4096" />
+        </label>
+        <label>Height
+          <input type="number" id="preheatHeight" value="240" min="16" max="4096" />
+        </label>
+      </div>
+      <button type="submit">Run preheat</button>
+    </form>
+    <div class="result" id="preheatResult"></div>
+  </section>
+
+  <section class="card">
+    <h2>Cleanup stale thumbnails</h2>
+    <p class="desc">
+      Removes cached thumbnail files that no longer correspond to a live
+      image in the registry (e.g. after images were deleted). Reconciles the
+      full cache every time &mdash; no parameters needed.
+    </p>
+    <form id="cleanupForm">
+      <button type="submit">Run cleanup</button>
+    </form>
+    <div class="result" id="cleanupResult"></div>
+  </section>
+
+  <section class="card danger">
+    <h2>Change photo root</h2>
+    <p class="desc">
+      Points the backend at a different base directory and triggers a full
+      reconciling rescan. Existing identity (portfolio/image UUIDs) is
+      preserved. The path must already exist and be a directory on the
+      server the backend container can see &mdash; a bad path is rejected
+      before anything changes.
+    </p>
+    <form id="rootForm">
+      <label>New base root path
+        <input type="text" id="rootPath" placeholder="/photos_root" required />
+      </label>
+      <button type="submit">Change root</button>
+    </form>
+    <div class="result" id="rootResult"></div>
+  </section>
+
+</main>
+
+<script src="admin.js"></script>
+</body>
+</html>

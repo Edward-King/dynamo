@@ -1,0 +1,7 @@
+{
+  "photoshare_base_url": "http://127.0.0.1:8000",
+  "photoshare_api_key": "PASTE_YOUR_PHOTOSHARE_ADMIN_API_KEY_HERE",
+  "proxy_host": "127.0.0.1",
+  "proxy_port": 8200,
+  "cors_allow_origins": ["http://127.0.0.1:5600", "http://localhost:5600"]
+}

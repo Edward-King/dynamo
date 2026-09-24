@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.coverage
+.git/
+config.json
+tests/
+test_main.py
+conftest.py
+requirements-dev.txt

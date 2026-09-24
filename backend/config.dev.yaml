@@ -1,0 +1,52 @@
+# PhotoShare development configuration.
+# Run with: python -m photoshare --config config.dev.yaml
+
+# Expose base_root and cache_root/thumbnails via unauthenticated static
+# mounts (/static-photos, /static-thumbs) so images embed directly in a
+# plain <img src>. Default false. Enabling it means anyone with the URL can
+# fetch the file with no API key -- an explicit opt-in security tradeoff.
+enable_static_file_serving: false
+
+server:
+  host: "127.0.0.1"
+  port: 8000
+  workers: 1
+  cors_allowed_origins: ["http://localhost:3000"]
+
+storage:
+  base_root: "./sample_photos"
+  allowed_extensions: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic"]
+
+cache:
+  cache_root: "./dev_cache"
+  thumbnail_sizes:
+    - [320, 240]
+    - [800, 600]
+  default_static_thumbnail_size: [320, 240]
+  default_static_icon_size: [320, 240]
+  tile_threshold_px:
+    width: 4000
+    height: 3000
+
+database:
+  busy_timeout_ms: 5000
+  wal_autocheckpoint_pages: 1000
+
+auth:
+  scheme: "api_key"
+  api_key_header: "X-API-Key"
+  key_expiry_days: 365
+
+rate_limiting:
+  read_requests_per_minute: 100
+  admin_requests_per_minute: 10
+
+rescan:
+  on_startup: true
+  watch_filesystem: false
+  # Dev-only convenience. Production configs MUST keep this true.
+  cycle_detection: true
+
+logging:
+  level: "DEBUG"
+  rescan_log_path: "./logs/rescan_history.jsonl"

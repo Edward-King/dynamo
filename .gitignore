@@ -1,0 +1,45 @@
+# macOS System Files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# Files that may appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Secrets and environment-specific settings
+.env
+.env.*
+!.env.example
+
+# Editor
+.vscode/
+.idea/
+
+# Logs and generated files
+*.log
+logs/
+tmp/
+
+# Local databases and uploads, if they should not be versioned
+*.sqlite
+*.db
+uploads/
+data/
+

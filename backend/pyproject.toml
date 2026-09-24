@@ -1,0 +1,13 @@
+[tool.pytest.ini_options]
+# Formal pytest suite for PhotoShare v3.0 (replaces the deferred harness
+# note in tests/README.md). smoke_test.py is intentionally NOT collected
+# here -- it remains a standalone legacy quick-check run via
+# `python smoke_test.py`.
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "--tb=short -ra"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]

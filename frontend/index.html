@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+    <meta name="theme-color" content="#111111">
+    <title>PhotoShare Gallery</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="gallery">
+
+<div class="page-content">
+
+    <!-- Breadcrumb trail for portfolio navigation -->
+    <nav id="breadcrumb" class="breadcrumb" aria-label="Portfolio path"></nav>
+
+    <!-- Sub-portfolio ("folder") tiles -->
+    <div id="folderGrid" class="cross-browser-grid folder-grid"></div>
+
+    <!-- Loading / error / empty states -->
+    <p id="statusMessage" class="status-message" role="status"></p>
+
+    <!-- Image grid -->
+    <div id="galleryGrid" class="cross-browser-grid"></div>
+</div>
+
+<!-- Fullscreen Lightbox Modal -->
+<div id="lightbox" class="lightbox-modal" role="dialog" aria-modal="true" aria-label="Image viewer">
+    <button id="closeBtn" class="lightbox-close" aria-label="Close">&times;</button>
+
+    <button id="prevBtn" class="lightbox-btn lightbox-prev" aria-label="Previous image">&#10094;</button>
+    <button id="nextBtn" class="lightbox-btn lightbox-next" aria-label="Next image">&#10095;</button>
+
+    <img id="lightboxImg" class="lightbox-content" src="" alt="" decoding="async">
+    <div id="lightboxCaption" class="lightbox-caption"></div>
+</div>
+
+<script src="common.js"></script>
+<script src="script.js"></script>
+
+</body>
+</html>
