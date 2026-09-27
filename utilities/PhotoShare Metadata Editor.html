@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PhotoShare meta.json Editor</title>
+<style>
+  :root {
+    --bg: #F7F6F2;
+    --surface: #F9F8F5;
+    --surface-alt: #FBFBF9;
+    --border: #D4D1CA;
+    --text: #28251D;
+    --text-muted: #7A7974;
+    --text-faint: #BAB9B4;
+    --primary: #01696F;
+    --primary-hover: #0C4E54;
+    --error: #A12C7B;
+    --warning: #964219;
+    --success: #437A22;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .app {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+  }
+  header h1 {
+    font-size: 24px;
+    margin: 0 0 4px;
+  }
+  header p {
+    color: var(--text-muted);
+    margin: 0 0 24px;
+    font-size: 14px;
+  }
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+    background: var(--surface);
+    margin-bottom: 24px;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .dropzone.dragover {
+    border-color: var(--primary);
+    background: var(--surface-alt);
+    color: var(--text);
+  }
+  .dropzone-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 20px;
+  }
+  .panel h2 {
+    font-size: 16px;
+    margin: 0 0 4px;
+  }
+  .panel .hint {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0 0 16px;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+  .field {
+    margin-bottom: 16px;
+  }
+  .field-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+  input[type="text"], textarea {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+    background: #fff;
+    color: var(--text);
+  }
+  textarea {
+    resize: vertical;
+    min-height: 64px;
+  }
+  input[type="text"]:focus, textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+  }
+  input.invalid, textarea.invalid {
+    border-color: var(--error);
+  }
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .switch {
+    position: relative;
+    width: 42px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background: var(--border);
+    border-radius: 24px;
+    transition: 0.15s;
+  }
+  .switch .slider::before {
+    content: "";
+    position: absolute;
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    top: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: 0.15s;
+  }
+  .switch input:checked + .slider { background: var(--primary); }
+  .switch input:checked + .slider::before { transform: translateX(18px); }
+  .radio-hint-group {
+    display: flex;
+    gap: 16px;
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .radio-hint-group label {
+    font-weight: 400;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 0;
+    cursor: pointer;
+  }
+  .chip-input {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fff;
+  }
+  .chip-input.invalid { border-color: var(--error); }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 3px 8px 3px 10px;
+    font-size: 13px;
+  }
+  .chip button {
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+  }
+  .chip button:hover { color: var(--error); }
+  .chip-input input {
+    border: none;
+    outline: none;
+    flex: 1;
+    min-width: 100px;
+    font-size: 13px;
+    padding: 3px;
+  }
+  .image-entry {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    margin-bottom: 12px;
+    background: var(--surface-alt);
+    position: relative;
+  }
+  .image-entry .remove-entry {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .image-entry .remove-entry:hover { color: var(--error); }
+  .row-index {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    font-weight: 600;
+  }
+  button.btn {
+    border: 1px solid var(--primary);
+    background: var(--primary);
+    color: #fff;
+    padding: 9px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button.btn:hover { background: var(--primary-hover); }
+  button.btn-secondary {
+    background: var(--surface);
+    color: var(--primary);
+    border: 1px solid var(--primary);
+  }
+  button.btn-secondary:hover { background: var(--surface-alt); }
+  button.btn-ghost {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.btn-ghost:hover { border-color: var(--primary); color: var(--primary); }
+  .actions-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .error-banner {
+    background: #fff;
+    border: 1px solid var(--error);
+    color: var(--error);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    display: none;
+    white-space: pre-wrap;
+  }
+  .error-banner.show { display: block; }
+  .success-banner {
+    background: #fff;
+    border: 1px solid var(--success);
+    color: var(--success);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    display: none;
+  }
+  .success-banner.show { display: block; }
+  pre#preview {
+    background: #1C1B19;
+    color: #CDCCCA;
+    padding: 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    overflow-x: auto;
+    margin: 0;
+    font-family: "SF Mono", Consolas, monospace;
+  }
+  .field-error {
+    color: var(--error);
+    font-size: 12px;
+    margin-top: 4px;
+    display: none;
+  }
+  .field-error.show { display: block; }
+  #file-input { display: none; }
+  .top-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>PhotoShare meta.json Editor</h1>
+    <p>A self-contained tool to create, import, and export <code>meta.json</code> portfolio sidecar files. Nothing here is uploaded anywhere — everything happens in your browser.</p>
+  </header>
+
+  <div class="dropzone" id="dropzone">
+    Drag an existing <code>meta.json</code> file here to import it
+    <div class="dropzone-actions">
+      <button type="button" class="btn-ghost" id="browse-btn">Choose file&hellip;</button>
+      <button type="button" class="btn-ghost" id="reset-btn">Start over</button>
+    </div>
+    <input type="file" id="file-input" accept="application/json,.json">
+  </div>
+
+  <div class="error-banner" id="import-error"></div>
+  <div class="success-banner" id="import-success"></div>
+
+  <div class="panel">
+    <div class="toggle-row">
+      <label class="switch">
+        <input type="checkbox" id="virtual-toggle">
+        <span class="slider"></span>
+      </label>
+      <div>
+        <strong>Virtual portfolio</strong>
+        <div class="field-hint" style="margin-top:2px;">When on, this directory becomes a curated collection referencing images already indexed elsewhere in the library, instead of listing its own physical images.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="standard-fields">
+    <h2>Portfolio details</h2>
+    <p class="hint">All fields here are optional. Leave a field blank to omit it from the exported file.</p>
+
+    <div class="field">
+      <label for="field-portfolio">Display name (<code>portfolio</code>)</label>
+      <input type="text" id="field-portfolio" placeholder="e.g. Japan">
+      <div class="field-hint">If left blank, PhotoShare uses the directory name instead.</div>
+    </div>
+
+    <div class="field">
+      <label for="field-description">Description (<code>description</code>)</label>
+      <textarea id="field-description" placeholder="e.g. Street photographs and travel images."></textarea>
+    </div>
+
+    <div class="field">
+      <label for="tags-input">Tags (<code>tags</code>)</label>
+      <div class="chip-input" id="tags-chip-input">
+        <input type="text" id="tags-input" placeholder="Type a tag and press Enter">
+      </div>
+      <div class="field-hint">Stored as a JSON array of strings. This tool never exports tags as a comma-separated string — PhotoShare's scanner rejects that.</div>
+    </div>
+
+    <div class="field">
+      <label for="field-icon-dir">Icon image (<code>icon_dir</code>)</label>
+      <input type="text" id="field-icon-dir" placeholder="cover.jpg">
+      <div class="radio-hint-group">
+        <label><input type="radio" name="icon-mode" value="bare" checked> Filename in this folder</label>
+        <label><input type="radio" name="icon-mode" value="path"> Path from library root</label>
+      </div>
+      <div class="field-hint" id="icon-dir-hint">Resolved relative to this portfolio's own directory. If left blank, PhotoShare uses the first image in the folder alphabetically.</div>
+    </div>
+  </div>
+
+  <div class="panel" id="virtual-fields" style="display:none;">
+    <h2>Virtual portfolio details</h2>
+    <p class="hint">Every entry needs a relative path to an image that is already indexed elsewhere in the library. <code>portfolio</code>, <code>description</code>, and <code>icon_dir</code> above still apply to a virtual portfolio.</p>
+
+    <div id="image-entries"></div>
+    <button type="button" class="btn-ghost" id="add-entry-btn">+ Add image entry</button>
+  </div>
+
+  <div class="panel">
+    <div class="top-actions">
+      <button type="button" class="btn-secondary" id="copy-btn">Copy JSON</button>
+      <button type="button" class="btn" id="download-btn">Download meta.json</button>
+    </div>
+    <h2>Preview</h2>
+    <p class="hint">This is exactly what will be written to <code>meta.json</code>.</p>
+    <pre id="preview"></pre>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- State ----------
+  var state = {
+    portfolio: "",
+    description: "",
+    tags: [],
+    iconDir: "",
+    iconMode: "bare", // "bare" | "path"
+    virtual: false,
+    images: [] // { rel_path, alternate_name, tags: [] }
+  };
+
+  // ---------- DOM refs ----------
+  var el = {
+    dropzone: document.getElementById("dropzone"),
+    fileInput: document.getElementById("file-input"),
+    browseBtn: document.getElementById("browse-btn"),
+    resetBtn: document.getElementById("reset-btn"),
+    importError: document.getElementById("import-error"),
+    importSuccess: document.getElementById("import-success"),
+    virtualToggle: document.getElementById("virtual-toggle"),
+    standardFields: document.getElementById("standard-fields"),
+    virtualFields: document.getElementById("virtual-fields"),
+    portfolio: document.getElementById("field-portfolio"),
+    description: document.getElementById("field-description"),
+    tagsInput: document.getElementById("tags-input"),
+    tagsChipInput: document.getElementById("tags-chip-input"),
+    iconDir: document.getElementById("field-icon-dir"),
+    iconDirHint: document.getElementById("icon-dir-hint"),
+    imageEntries: document.getElementById("image-entries"),
+    addEntryBtn: document.getElementById("add-entry-btn"),
+    preview: document.getElementById("preview"),
+    downloadBtn: document.getElementById("download-btn"),
+    copyBtn: document.getElementById("copy-btn")
+  };
+
+  var iconModeRadios = document.querySelectorAll('input[name="icon-mode"]');
+
+  // ---------- Helpers ----------
+  function isStringArray(v) {
+    return Array.isArray(v) && v.every(function (x) { return typeof x === "string"; });
+  }
+
+  function escapeHtml(s) {
+    var d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function showError(msg) {
+    el.importError.textContent = msg;
+    el.importError.classList.add("show");
+    el.importSuccess.classList.remove("show");
+  }
+
+  function showSuccess(msg) {
+    el.importSuccess.textContent = msg;
+    el.importSuccess.classList.add("show");
+    el.importError.classList.remove("show");
+  }
+
+  function clearBanners() {
+    el.importError.classList.remove("show");
+    el.importSuccess.classList.remove("show");
+  }
+
+  // ---------- Validation mirroring photoshare/services/meta_json.py ----------
+  // Returns { ok: true, meta } or { ok: false, error }
+  function validateAndParse(raw) {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+      return { ok: false, error: "meta.json must contain a JSON object at the top level." };
+    }
+
+    var tags = ("tags" in raw) ? raw.tags : [];
+    if (!isStringArray(tags)) {
+      return {
+        ok: false,
+        error: "'tags' must be a JSON array of strings, got: " + JSON.stringify(tags) +
+          "\n(Comma-separated strings are not accepted by PhotoShare's scanner.)"
+      };
+    }
+
+    var virtual = Boolean(raw.virtual || false);
+    var images = [];
+    if (virtual) {
+      var imagesRaw = ("images" in raw) ? raw.images : [];
+      if (!Array.isArray(imagesRaw)) {
+        return { ok: false, error: "'images' must be a JSON array when 'virtual' is true." };
+      }
+      for (var i = 0; i < imagesRaw.length; i++) {
+        var entry = imagesRaw[i];
+        if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+          return { ok: false, error: "Virtual image entry " + i + " must be a JSON object." };
+        }
+        if (!("rel_path" in entry) || typeof entry.rel_path !== "string" || entry.rel_path === "") {
+          return {
+            ok: false,
+            error: "Virtual portfolio image entry missing required 'rel_path': " + JSON.stringify(entry)
+          };
+        }
+        var entryTags = ("tags" in entry) ? entry.tags : [];
+        if (!isStringArray(entryTags)) {
+          return {
+            ok: false,
+            error: "Image entry 'tags' must be a JSON array of strings: " + JSON.stringify(entry)
+          };
+        }
+        images.push({
+          rel_path: entry.rel_path,
+          alternate_name: (typeof entry.alternate_name === "string") ? entry.alternate_name : "",
+          tags: entryTags.slice()
+        });
+      }
+    }
+
+    return {
+      ok: true,
+      meta: {
+        portfolio: (typeof raw.portfolio === "string") ? raw.portfolio : "",
+        description: (typeof raw.description === "string") ? raw.description : "",
+        iconDir: (typeof raw.icon_dir === "string") ? raw.icon_dir : "",
+        tags: tags.slice(),
+        virtual: virtual,
+        images: images
+      }
+    };
+  }
+
+  // ---------- Rendering ----------
+  function renderTagChips() {
+    var existing = el.tagsChipInput.querySelectorAll(".chip");
+    existing.forEach(function (c) { c.remove(); });
+    state.tags.forEach(function (tag, idx) {
+      var chip = document.createElement("span");
+      chip.className = "chip";
+      chip.innerHTML = escapeHtml(tag) + ' <button type="button" data-idx="' + idx + '" aria-label="Remove tag">&times;</button>';
+      el.tagsChipInput.insertBefore(chip, el.tagsInput);
+    });
+  }
+
+  function renderImageEntries() {
+    el.imageEntries.innerHTML = "";
+    state.images.forEach(function (entry, idx) {
+      var wrap = document.createElement("div");
+      wrap.className = "image-entry";
+      wrap.innerHTML =
+        '<button type="button" class="remove-entry" data-idx="' + idx + '">Remove</button>' +
+        '<div class="row-index">Entry ' + (idx + 1) + '</div>' +
+        '<div class="field">' +
+          '<label>Relative path (<code>rel_path</code>) <span style="color:var(--error)">*</span></label>' +
+          '<input type="text" class="entry-rel-path" data-idx="' + idx + '" placeholder="Japan/Tokyo/IMG_0007.heic" value="' + escapeHtml(entry.rel_path) + '">' +
+        '</div>' +
+        '<div class="field">' +
+          '<label>Display name override (<code>alternate_name</code>)</label>' +
+          '<input type="text" class="entry-alt-name" data-idx="' + idx + '" placeholder="Night crossing" value="' + escapeHtml(entry.alternate_name) + '">' +
+        '</div>' +
+        '<div class="field">' +
+          '<label>Entry tags (<code>tags</code>)</label>' +
+          '<div class="chip-input entry-tags-chip-input" data-idx="' + idx + '">' +
+            '<input type="text" class="entry-tags-input" data-idx="' + idx + '" placeholder="Type a tag and press Enter">' +
+          '</div>' +
+        '</div>';
+      el.imageEntries.appendChild(wrap);
+
+      var chipHost = wrap.querySelector(".entry-tags-chip-input");
+      var tagInput = wrap.querySelector(".entry-tags-input");
+      entry.tags.forEach(function (tag, tagIdx) {
+        var chip = document.createElement("span");
+        chip.className = "chip";
+        chip.innerHTML = escapeHtml(tag) + ' <button type="button" class="entry-tag-remove" data-idx="' + idx + '" data-tag-idx="' + tagIdx + '">&times;</button>';
+        chipHost.insertBefore(chip, tagInput);
+      });
+    });
+  }
+
+  function buildMetaObject() {
+    var out = {};
+    if (state.portfolio.trim() !== "") out.portfolio = state.portfolio.trim();
+    if (state.description.trim() !== "") out.description = state.description;
+    if (state.tags.length > 0) out.tags = state.tags.slice();
+    if (state.iconDir.trim() !== "") out.icon_dir = state.iconDir.trim();
+    if (state.virtual) {
+      out.virtual = true;
+      out.images = state.images.map(function (entry) {
+        var e = { rel_path: entry.rel_path };
+        if (entry.alternate_name && entry.alternate_name.trim() !== "") e.alternate_name = entry.alternate_name.trim();
+        if (entry.tags.length > 0) e.tags = entry.tags.slice();
+        return e;
+      });
+    }
+    return out;
+  }
+
+  function render() {
+    // toggle panels
+    el.standardFields.style.display = "";
+    el.virtualFields.style.display = state.virtual ? "" : "none";
+    el.virtualToggle.checked = state.virtual;
+
+    // standard fields
+    el.portfolio.value = state.portfolio;
+    el.description.value = state.description;
+    el.iconDir.value = state.iconDir;
+    iconModeRadios.forEach(function (r) { r.checked = (r.value === state.iconMode); });
+    el.iconDirHint.textContent = state.iconMode === "bare"
+      ? "Resolved relative to this portfolio's own directory. If left blank, PhotoShare uses the first image in the folder alphabetically."
+      : "Resolved relative to the library root (use forward slashes, e.g. Japan/cover.jpg).";
+
+    renderTagChips();
+    renderImageEntries();
+
+    var json = JSON.stringify(buildMetaObject(), null, 2);
+    el.preview.textContent = json;
+  }
+
+  // ---------- Tag input handling ----------
+  function addTag(value) {
+    var v = value.trim();
+    if (v === "" || state.tags.indexOf(v) !== -1) return;
+    state.tags.push(v);
+    render();
+  }
+
+  el.tagsInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      addTag(el.tagsInput.value);
+      el.tagsInput.value = "";
+    } else if (e.key === "Backspace" && el.tagsInput.value === "" && state.tags.length > 0) {
+      state.tags.pop();
+      render();
+    }
+  });
+  el.tagsInput.addEventListener("blur", function () {
+    if (el.tagsInput.value.trim() !== "") {
+      addTag(el.tagsInput.value);
+      el.tagsInput.value = "";
+    }
+  });
+  el.tagsChipInput.addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-idx]");
+    if (btn) {
+      state.tags.splice(parseInt(btn.dataset.idx, 10), 1);
+      render();
+    }
+  });
+
+  // ---------- Standard field bindings ----------
+  el.portfolio.addEventListener("input", function () { state.portfolio = el.portfolio.value; render(); });
+  el.description.addEventListener("input", function () { state.description = el.description.value; render(); });
+  el.iconDir.addEventListener("input", function () { state.iconDir = el.iconDir.value; render(); });
+  iconModeRadios.forEach(function (r) {
+    r.addEventListener("change", function () {
+      if (r.checked) { state.iconMode = r.value; render(); }
+    });
+  });
+
+  el.virtualToggle.addEventListener("change", function () {
+    state.virtual = el.virtualToggle.checked;
+    render();
+  });
+
+  // ---------- Virtual image entries ----------
+  el.addEntryBtn.addEventListener("click", function () {
+    state.images.push({ rel_path: "", alternate_name: "", tags: [] });
+    render();
+  });
+
+  el.imageEntries.addEventListener("click", function (e) {
+    var removeBtn = e.target.closest(".remove-entry");
+    if (removeBtn) {
+      state.images.splice(parseInt(removeBtn.dataset.idx, 10), 1);
+      render();
+      return;
+    }
+    var tagRemoveBtn = e.target.closest(".entry-tag-remove");
+    if (tagRemoveBtn) {
+      var idx = parseInt(tagRemoveBtn.dataset.idx, 10);
+      var tagIdx = parseInt(tagRemoveBtn.dataset.tagIdx, 10);
+      state.images[idx].tags.splice(tagIdx, 1);
+      refreshEntryTagChips(idx);
+      return;
+    }
+  });
+
+  el.imageEntries.addEventListener("input", function (e) {
+    if (e.target.classList.contains("entry-rel-path")) {
+      state.images[parseInt(e.target.dataset.idx, 10)].rel_path = e.target.value;
+      // update preview only, avoid full re-render stealing focus
+      el.preview.textContent = JSON.stringify(buildMetaObject(), null, 2);
+    } else if (e.target.classList.contains("entry-alt-name")) {
+      state.images[parseInt(e.target.dataset.idx, 10)].alternate_name = e.target.value;
+      el.preview.textContent = JSON.stringify(buildMetaObject(), null, 2);
+    }
+  });
+
+  function refreshEntryTagChips(idx) {
+    var chipHost = el.imageEntries.querySelector('.entry-tags-chip-input[data-idx="' + idx + '"]');
+    if (!chipHost) return;
+    var tagInput = chipHost.querySelector(".entry-tags-input");
+    chipHost.querySelectorAll(".chip").forEach(function (c) { c.remove(); });
+    state.images[idx].tags.forEach(function (tag, tagIdx) {
+      var chip = document.createElement("span");
+      chip.className = "chip";
+      chip.innerHTML = escapeHtml(tag) + ' <button type="button" class="entry-tag-remove" data-idx="' + idx + '" data-tag-idx="' + tagIdx + '">&times;</button>';
+      chipHost.insertBefore(chip, tagInput);
+    });
+    el.preview.textContent = JSON.stringify(buildMetaObject(), null, 2);
+  }
+
+  el.imageEntries.addEventListener("keydown", function (e) {
+    if (e.target.classList.contains("entry-tags-input") && (e.key === "Enter" || e.key === ",")) {
+      e.preventDefault();
+      var idx = parseInt(e.target.dataset.idx, 10);
+      var v = e.target.value.trim();
+      if (v !== "" && state.images[idx].tags.indexOf(v) === -1) {
+        state.images[idx].tags.push(v);
+        e.target.value = "";
+        // Targeted update: only rebuild this row's chip area, not the whole
+        // entries list, so sibling fields being edited aren't disturbed.
+        refreshEntryTagChips(idx);
+      }
+    }
+  });
+
+  // Deliberately no full re-render on focusout: the "input" listener above
+  // already keeps state in sync on every keystroke, and rebuilding the DOM
+  // subtree on blur would replace the very input the user just left (or is
+  // about to enter), which can drop a value that was set right at the blur
+  // boundary. Rows are only rebuilt when entries are added/removed/reordered.
+
+  // ---------- Import ----------
+  function importFromText(text, sourceLabel) {
+    var raw;
+    try {
+      raw = JSON.parse(text);
+    } catch (err) {
+      showError((sourceLabel ? sourceLabel + ": " : "") + "Invalid JSON \u2014 " + err.message);
+      return;
+    }
+    var result = validateAndParse(raw);
+    if (!result.ok) {
+      showError((sourceLabel ? sourceLabel + ": " : "") + result.error);
+      return;
+    }
+    state.portfolio = result.meta.portfolio;
+    state.description = result.meta.description;
+    state.tags = result.meta.tags;
+    state.iconDir = result.meta.iconDir;
+    state.iconMode = (state.iconDir.indexOf("/") !== -1 || state.iconDir.indexOf("\\") !== -1) ? "path" : "bare";
+    state.virtual = result.meta.virtual;
+    state.images = result.meta.images;
+    clearBanners();
+    showSuccess("Imported successfully" + (sourceLabel ? " from " + sourceLabel : "") + ".");
+    render();
+  }
+
+  function handleFile(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      importFromText(String(reader.result), file.name);
+    };
+    reader.onerror = function () {
+      showError("Could not read the selected file.");
+    };
+    reader.readAsText(file);
+  }
+
+  el.browseBtn.addEventListener("click", function () { el.fileInput.click(); });
+  el.fileInput.addEventListener("change", function () {
+    if (el.fileInput.files && el.fileInput.files[0]) {
+      handleFile(el.fileInput.files[0]);
+    }
+    el.fileInput.value = "";
+  });
+
+  ["dragenter", "dragover"].forEach(function (evt) {
+    el.dropzone.addEventListener(evt, function (e) {
+      e.preventDefault();
+      el.dropzone.classList.add("dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach(function (evt) {
+    el.dropzone.addEventListener(evt, function (e) {
+      e.preventDefault();
+      el.dropzone.classList.remove("dragover");
+    });
+  });
+  el.dropzone.addEventListener("drop", function (e) {
+    var files = e.dataTransfer && e.dataTransfer.files;
+    if (files && files[0]) handleFile(files[0]);
+  });
+
+  el.resetBtn.addEventListener("click", function () {
+    state = { portfolio: "", description: "", tags: [], iconDir: "", iconMode: "bare", virtual: false, images: [] };
+    clearBanners();
+    render();
+  });
+
+  // ---------- Export ----------
+  el.downloadBtn.addEventListener("click", function () {
+    var json = JSON.stringify(buildMetaObject(), null, 2);
+    var blob = new Blob([json], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "meta.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  el.copyBtn.addEventListener("click", function () {
+    var json = JSON.stringify(buildMetaObject(), null, 2);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(json).then(function () {
+        var original = el.copyBtn.textContent;
+        el.copyBtn.textContent = "Copied!";
+        setTimeout(function () { el.copyBtn.textContent = original; }, 1200);
+      });
+    }
+  });
+
+  // ---------- Init ----------
+  render();
+})();
+</script>
+<script data-pplx-inline-edit>
+(function () {
+  if (window === window.top) return;
+
+  const allowedParentOrigins = ["https://www.perplexity.ai","https://perplexity.ai","https://testing.perplexity.ai","https://staging.perplexity.ai","https://*.preview.i.perplexity.ai","http://perplexity.localhost","http://localhost:1420","http://127.0.0.1:1420","http://localhost:3000","http://127.0.0.1:3000","http://localhost:5173","http://127.0.0.1:5173"];
+  const MAX_FONT_BYTES = 500 * 1024;
+  const MAX_TOTAL_FONT_BYTES = 2 * 1024 * 1024;
+  let scrollForwarding = false;
+  let scrollRaf = 0;
+  let trustedTopOrigin = null;
+
+  // Allow entries like "https://*.preview.i.perplexity.ai" — the wildcard
+  // matches a single DNS label (no dots), so "https://*.foo" cannot stretch
+  // across multiple labels.
+  function matchesAllowedOrigin(origin) {
+    if (!origin) return false;
+    for (const entry of allowedParentOrigins) {
+      if (!entry.includes("*")) {
+        if (entry === origin) return true;
+        continue;
+      }
+      const pattern = new RegExp(
+        "^" +
+          entry.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^.]+") +
+          "$",
+      );
+      if (pattern.test(origin)) return true;
+    }
+    return false;
+  }
+
+  // Trust decision: when the sender is same-origin-visible (event.origin is a
+  // real origin like https://www.perplexity.ai) we trust event.origin directly.
+  // When event.origin is "null" (opaque broker srcdoc), we fall back to the
+  // broker's stamped `parentOrigin` to identify the top window. The fallback
+  // is claim-only — we rely on the browser's native `targetOrigin` enforcement
+  // on the response path (see postToTrustedTop) to ensure replies can't be
+  // delivered to anyone but the actual top window of that claimed origin.
+  function getTrustedParentOrigin(event) {
+    const forwardedParentOrigin =
+      typeof event.data.parentOrigin === "string" ? event.data.parentOrigin : null;
+    const parentOrigin = event.origin === "null" ? forwardedParentOrigin : event.origin;
+    return matchesAllowedOrigin(parentOrigin) ? parentOrigin : null;
+  }
+
+  // All responses go to window.top with targetOrigin = the allowlisted origin.
+  // An attacker that iframes us inside their own null-origin broker can claim
+  // any parentOrigin they like, but the browser will drop the reply whenever
+  // the real top's origin doesn't match — so the screenshot never leaves.
+  function postToTrustedTop(message) {
+    if (!trustedTopOrigin) return;
+    try {
+      window.top.postMessage(message, trustedTopOrigin);
+    } catch (_error) {}
+  }
+
+  function inlineAll(original, clone) {
+    if (original.nodeType !== 1 || clone.nodeType !== 1) return;
+
+    try {
+      const computedStyle = getComputedStyle(original);
+      // cssText on a computed style is the serialized declaration in modern
+      // Chromium/Safari — a single read beats enumerating ~400 longhand
+      // properties. Firefox returns "" here, so we fall back on empty.
+      const serialized = computedStyle.cssText;
+      if (serialized) {
+        clone.style.cssText = serialized;
+      } else {
+        const parts = new Array(computedStyle.length);
+        for (let index = 0; index < computedStyle.length; index += 1) {
+          const property = computedStyle[index];
+          parts[index] = `${property}:${computedStyle.getPropertyValue(property)};`;
+        }
+        clone.style.cssText = parts.join("");
+      }
+    } catch (_error) {}
+
+    const originalChildren = original.children;
+    const clonedChildren = clone.children;
+    for (
+      let index = 0;
+      index < originalChildren.length && index < clonedChildren.length;
+      index += 1
+    ) {
+      inlineAll(originalChildren[index], clonedChildren[index]);
+    }
+  }
+
+  function extractFontUrl(srcValue) {
+    const matches = [
+      ...srcValue.matchAll(
+        /url\(["']?([^"')]+)["']?\)(?:\s*format\(["']?([^"')]+)["']?\))?/gi,
+      ),
+    ];
+    if (matches.length === 0) return null;
+    const woff2 = matches.find((m) => m[2] && m[2].toLowerCase().includes("woff2"));
+    if (woff2) return woff2[1];
+    const woff = matches.find((m) => m[2] && m[2].toLowerCase().includes("woff"));
+    if (woff) return woff[1];
+    return matches[0][1];
+  }
+
+  // Cache resolved font URL -> data URI across captures. Fonts on a page
+  // essentially never change, and a batch run emits multiple captures back to
+  // back — without this we'd refetch + re-base64 every time.
+  const fontDataUriCache = new Map();
+  const SRC_DECLARATION_RE = /src\s*:\s*[^;}]+/i;
+
+  async function fetchAsDataUri(url) {
+    if (fontDataUriCache.has(url)) return fontDataUriCache.get(url);
+    let dataUri = null;
+    try {
+      const response = await fetch(url, { mode: "cors", credentials: "omit" });
+      if (response.ok) {
+        const blob = await response.blob();
+        if (blob.size <= MAX_FONT_BYTES) {
+          dataUri = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () =>
+              resolve(typeof reader.result === "string" ? reader.result : null);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(blob);
+          });
+        }
+      }
+    } catch (_error) {
+      dataUri = null;
+    }
+    fontDataUriCache.set(url, dataUri);
+    return dataUri;
+  }
+
+  function collectFontFaceRuleTexts() {
+    const rules = [];
+    for (const sheet of document.styleSheets) {
+      let cssRules;
+      try {
+        cssRules = sheet.cssRules;
+      } catch (_error) {
+        continue;
+      }
+      if (!cssRules) continue;
+      for (const rule of cssRules) {
+        const cssText = rule.cssText || "";
+        if (cssText.startsWith("@font-face")) rules.push(cssText);
+      }
+    }
+    return rules;
+  }
+
+  async function buildInlinedFontCss() {
+    const ruleTexts = collectFontFaceRuleTexts();
+    if (ruleTexts.length === 0) return null;
+
+    const resolved = ruleTexts.map((cssText) => {
+      if (!SRC_DECLARATION_RE.test(cssText)) return null;
+      const srcMatch = cssText.match(/src\s*:\s*([^;}]+)[;}]/i);
+      if (!srcMatch) return null;
+      const url = extractFontUrl(srcMatch[1]);
+      if (!url) return null;
+      try {
+        return { cssText, url: new URL(url, document.baseURI).href };
+      } catch (_error) {
+        return null;
+      }
+    });
+
+    const dataUris = await Promise.all(
+      resolved.map((entry) => (entry ? fetchAsDataUri(entry.url) : Promise.resolve(null))),
+    );
+
+    const inlined = [];
+    let totalBytes = 0;
+    for (let index = 0; index < resolved.length; index += 1) {
+      const entry = resolved[index];
+      const dataUri = dataUris[index];
+      if (!entry || !dataUri) continue;
+      const approxBytes = dataUri.length * 0.75;
+      if (totalBytes + approxBytes > MAX_TOTAL_FONT_BYTES) break;
+      totalBytes += approxBytes;
+      inlined.push(entry.cssText.replace(SRC_DECLARATION_RE, `src: url("${dataUri}")`));
+    }
+    return inlined.length > 0 ? inlined.join("\n") : null;
+  }
+
+  function stripExternal(clone) {
+    const images = clone.querySelectorAll("img");
+    for (let index = 0; index < images.length; index += 1) {
+      const src = images[index].getAttribute("src");
+      if (src && !src.startsWith("data:")) images[index].removeAttribute("src");
+    }
+
+    const elements = clone.querySelectorAll("*");
+    for (let index = 0; index < elements.length; index += 1) {
+      const style = elements[index].style.cssText;
+      if (style && style.includes("url(")) {
+        elements[index].style.cssText = style.replace(
+          /url\(["']?(?!data:)[^)"']*["']?\)/gi,
+          "none",
+        );
+      }
+    }
+  }
+
+  function emitScroll() {
+    scrollRaf = 0;
+    if (!scrollForwarding) return;
+    postToTrustedTop({
+      type: "INLINE_EDIT_SCROLL",
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+    });
+  }
+
+  window.addEventListener(
+    "scroll",
+    function () {
+      if (!scrollForwarding || scrollRaf) return;
+      scrollRaf = requestAnimationFrame(emitScroll);
+    },
+    { passive: true, capture: true },
+  );
+
+  async function handleCaptureRequest(event) {
+    const requestId = event.data.requestId;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+
+    function postResult(dataUrl) {
+      postToTrustedTop({
+        type: "INLINE_EDIT_SCREENSHOT_RESULT",
+        requestId,
+        dataUrl,
+        scrollX,
+        scrollY,
+      });
+    }
+
+    try {
+      // Wait for any pending web fonts to resolve so both inline metrics and
+      // the @font-face inlining below see the same loaded faces.
+      if (document.fonts && document.fonts.ready) {
+        try {
+          await document.fonts.ready;
+        } catch (_error) {}
+      }
+
+      const clone = document.documentElement.cloneNode(true);
+      inlineAll(document.documentElement, clone);
+
+      const removedNodes = clone.querySelectorAll("script,link[rel=\"stylesheet\"],style");
+      for (let index = 0; index < removedNodes.length; index += 1) {
+        removedNodes[index].remove();
+      }
+
+      stripExternal(clone);
+
+      // Re-embed web fonts as data-URI @font-face rules so the SVG rasterizer
+      // can resolve them — external font URLs aren't fetched during
+      // foreignObject rendering, which would otherwise force a fallback face
+      // and change text metrics.
+      const inlinedFontCss = await buildInlinedFontCss();
+      if (inlinedFontCss) {
+        const styleEl = document.createElement("style");
+        styleEl.textContent = inlinedFontCss;
+        const head = clone.querySelector("head");
+        if (head) head.appendChild(styleEl);
+        else clone.insertBefore(styleEl, clone.firstChild);
+      }
+
+      const html = new XMLSerializer().serializeToString(clone);
+      const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
+        '<foreignObject width="100%" height="100%">' +
+        `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;height:${height}px;overflow:hidden">` +
+        `<div style="position:relative;left:-${scrollX}px;top:-${scrollY}px">` +
+        html +
+        "</div></div></foreignObject></svg>";
+      const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      const image = new Image();
+      image.onload = function () {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(image, 0, 0);
+        postResult(canvas.toDataURL("image/png"));
+      };
+      image.onerror = function () {
+        postResult(null);
+      };
+      image.src = svgUrl;
+    } catch (_error) {
+      postResult(null);
+    }
+  }
+
+  window.addEventListener("message", function (event) {
+    if (!event.data) return;
+    // Only accept messages from the direct parent frame. Blocks sibling /
+    // unrelated-window postMessage senders that could otherwise reach us.
+    if (event.source !== window.parent) return;
+
+    const trustedParentOrigin = getTrustedParentOrigin(event);
+    if (!trustedParentOrigin) return;
+    trustedTopOrigin = trustedParentOrigin;
+
+    if (event.data.type === "INLINE_EDIT_SCROLL_START") {
+      scrollForwarding = true;
+      emitScroll();
+      return;
+    }
+
+    if (event.data.type === "INLINE_EDIT_SCROLL_STOP") {
+      scrollForwarding = false;
+      if (scrollRaf) cancelAnimationFrame(scrollRaf);
+      scrollRaf = 0;
+      return;
+    }
+
+    if (event.data.type !== "INLINE_EDIT_CAPTURE_REQUEST") return;
+
+    handleCaptureRequest(event);
+  });
+})();
+
+</script></body>
+</html>
