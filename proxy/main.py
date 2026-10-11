@@ -36,6 +36,7 @@ or key at all.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import mimetypes
 import os
@@ -341,10 +342,22 @@ async def stream_full_image(img_uuid: str, download: bool = Query(False)):
     because the gallery frontend and this proxy are on different origins,
     and browsers ignore the HTML `download` attribute on cross-origin links.
     Without the parameter the response is unchanged.
+
+    For downloads, the filename lookup runs at the same time as the image
+    fetch rather than after it, so it adds no extra wait. If the image
+    fetch fails, the lookup is cancelled.
     """
-    resp = await _upstream_get(f"/api/v2/images/{img_uuid}/full")
-    if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    name_task: asyncio.Task[str | None] | None = None
+    if download:
+        name_task = asyncio.create_task(_lookup_image_name(img_uuid))
+    try:
+        resp = await _upstream_get(f"/api/v2/images/{img_uuid}/full")
+        if resp.status_code >= 400:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    except BaseException:
+        if name_task is not None:
+            name_task.cancel()
+        raise
     content_type = resp.headers.get("content-type", "image/jpeg")
     headers = {
         k: v
@@ -362,8 +375,8 @@ async def stream_full_image(img_uuid: str, download: bool = Query(False)):
     # apart. (Starlette already adds Vary: Origin when a specific origin list
     # is configured; this makes the "*" case behave the same.)
     headers["Vary"] = "Origin"
-    if download:
-        name = await _lookup_image_name(img_uuid)
+    if name_task is not None:
+        name = await name_task
         filename = _safe_download_filename(name, img_uuid, content_type)
         headers["Content-Disposition"] = _content_disposition_attachment(filename)
     return StreamingResponse(

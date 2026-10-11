@@ -88,11 +88,16 @@ to the proxy over plain, keyless routes.
 The test suite (`test_main.py` / `conftest.py`) covers every route above,
 including the portfolio/image URL-rewrite logic, pagination params, error
 pass-through, the `?download=1` file-download option (filename choice,
-safe/encoded names, fallbacks), and the `/gallery/health` check. It mocks the upstream
-PhotoShare server with [respx](https://lundberg.github.io/respx/), so it
-runs fully offline -- no real `config.json` or running PhotoShare server
-is needed (a throwaway one is generated for the test run and any existing
-`config.json` is safely restored afterwards).
+safe/encoded names, fallbacks, concurrent filename lookup), and the
+`/gallery/health` check. It mocks the upstream PhotoShare server with
+[respx](https://lundberg.github.io/respx/), so it runs fully offline --
+no real `config.json` or running PhotoShare server is needed (a throwaway
+one is generated for the test run and any existing `config.json` is
+safely restored afterwards).
+
+The same suite runs automatically on GitHub (Python 3.12 and 3.14) for
+every pull request and push to `main` that touches `proxy/` -- see
+`.github/workflows/proxy-tests.yml`.
 
 ```bash
 pip install -r requirements-dev.txt

@@ -389,6 +389,54 @@ def test_download_falls_back_when_metadata_connection_drops(app, upstream_base):
 
 
 @respx.mock
+def test_download_fetches_image_and_filename_concurrently(app, upstream_base):
+    # PR #1 review, item 3: the image bytes and the filename lookup used to
+    # be fetched one after the other. Each mocked upstream route below waits
+    # until the *other* one has started, so the test only passes if both
+    # requests are in flight at the same time (sequential code would hit
+    # the timeout and fail).
+    import asyncio
+
+    full_started = asyncio.Event()
+    meta_started = asyncio.Event()
+
+    async def full_side_effect(request):
+        full_started.set()
+        await asyncio.wait_for(meta_started.wait(), timeout=2)
+        return Response(200, content=b"FULL", headers={"content-type": "image/jpeg"})
+
+    async def meta_side_effect(request):
+        meta_started.set()
+        await asyncio.wait_for(full_started.wait(), timeout=2)
+        return Response(200, json={"id": "img-1", "name": "sunset.jpg"})
+
+    respx.get(f"{upstream_base}/api/v2/images/img-1/full").mock(side_effect=full_side_effect)
+    respx.get(f"{upstream_base}/api/v2/images/img-1").mock(side_effect=meta_side_effect)
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/gallery/image/img-1/full", params={"download": 1})
+
+    assert resp.status_code == 200
+    assert 'filename="sunset.jpg"' in resp.headers["content-disposition"]
+
+
+@respx.mock
+def test_download_image_error_still_propagates_with_concurrent_lookup(app, upstream_base):
+    # With the lookup running alongside, an image failure must still come
+    # back as the image's own error status -- not be masked by the lookup.
+    respx.get(f"{upstream_base}/api/v2/images/img-1/full").mock(
+        return_value=Response(503, text="unavailable")
+    )
+    respx.get(f"{upstream_base}/api/v2/images/img-1").mock(
+        return_value=Response(200, json={"id": "img-1", "name": "sunset.jpg"})
+    )
+    client = TestClient(app)
+    resp = client.get("/gallery/image/img-1/full", params={"download": 1})
+
+    assert resp.status_code == 503
+    assert "content-disposition" not in resp.headers
+
+
+@respx.mock
 def test_download_upstream_image_error_propagates_status(app, upstream_base):
     respx.get(f"{upstream_base}/api/v2/images/missing/full").mock(
         return_value=Response(404, text="not found")

@@ -392,7 +392,7 @@ const SHARE_MODE = detectShareMode();
 
 // The prepared File for the image currently in the lightbox (share mode only).
 // Holding at most one at a time keeps memory bounded on phones.
-let shareFileCache = { id: null, file: null, promise: null };
+let shareFileCache = { id: null, file: null, promise: null, controller: null };
 let downloadBusy = false;
 let noticeTimer = null;
 
@@ -432,9 +432,15 @@ function prepareShareFile(item) {
     // at startup in share mode) and the proxy forwards PhotoShare's immutable
     // Cache-Control, so this is normally served from the browser cache rather
     // than downloaded a second time.
+    //
+    // Only the photo on screen is prepared: moving to another photo (or
+    // closing the lightbox) cancels the previous photo's request if it's
+    // still running, so quick swiping doesn't pile up full-size downloads.
     if (!SHARE_MODE || !item || shareFileCache.id === item.id) return;
-    const entry = { id: item.id, file: null, promise: null };
-    entry.promise = fetch(`${PROXY_BASE_URL}${item.full_url}`)
+    releaseShareFile();
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const entry = { id: item.id, file: null, promise: null, controller };
+    entry.promise = fetch(`${PROXY_BASE_URL}${item.full_url}`, controller ? { signal: controller.signal } : {})
         .then((res) => {
             if (!res.ok) throw new Error(`Image request failed (${res.status})`);
             return res.blob();
@@ -450,7 +456,9 @@ function prepareShareFile(item) {
 }
 
 function releaseShareFile() {
-    shareFileCache = { id: null, file: null, promise: null };
+    // Cancel the request if it hasn't finished; harmless if it has.
+    if (shareFileCache.controller && !shareFileCache.file) shareFileCache.controller.abort();
+    shareFileCache = { id: null, file: null, promise: null, controller: null };
 }
 
 function setDownloadBusy(busy) {
@@ -512,7 +520,26 @@ async function shareImage(item) {
     try {
         // If the file is already prepared there is no await before share(),
         // so the tap still counts as the user's action.
-        const file = entry.file || await entry.promise;
+        let file = entry.file;
+        if (!file) {
+            try {
+                file = await entry.promise;
+            } catch (prepareErr) {
+                if (prepareErr && prepareErr.name === 'AbortError') {
+                    // The user swiped to another photo or closed the
+                    // lightbox while it was being prepared -- nothing to do.
+                    return;
+                }
+                // Couldn't get the photo ready for the share sheet (e.g. a
+                // network hiccup). Rather than just showing an error, fall
+                // back to a regular download, which is a separate request.
+                console.warn('Could not prepare photo for sharing; downloading instead.', prepareErr);
+                if (shareFileCache === entry) releaseShareFile();
+                fellBackToDownload = true;
+                startFileDownload(item);
+                return;
+            }
+        }
         if (!navigator.canShare({ files: [file] })) {
             fellBackToDownload = true;
             startFileDownload(item);
@@ -529,6 +556,7 @@ async function shareImage(item) {
             fellBackToDownload = true;
             startFileDownload(item);
         } else {
+            // The share sheet itself failed (the photo was ready).
             console.error(err);
             showNotice("Couldn't save. Try again.", true);
             // Drop the failed attempt so the next tap fetches afresh.
