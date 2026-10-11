@@ -9,6 +9,7 @@ Covers every route currently exposed to the frontend:
   GET /gallery/portfolios/{port_uuid}/images
   GET /gallery/image/{img_uuid}/thumb
   GET /gallery/image/{img_uuid}/full
+  GET /gallery/image/{img_uuid}/full?download=1
   GET /gallery/health
 
 All upstream (PhotoShare) calls are intercepted with respx so the suite
@@ -230,6 +231,170 @@ def test_stream_full_image_returns_bytes(app, upstream_base):
 
     assert resp.status_code == 200
     assert resp.content == b"FAKEFULLBYTES"
+
+
+# ---------------------------------------------------------------------------
+# Download (?download=1) on the full-image route
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_full_image_without_download_is_unchanged(app, upstream_base):
+    # Guards the "optional, additive" promise: no attachment header and no
+    # extra metadata call unless the caller asks for a download.
+    full = respx.get(f"{upstream_base}/api/v2/images/img-1/full").mock(
+        return_value=Response(200, content=b"FULL", headers={"content-type": "image/jpeg"})
+    )
+    meta = respx.get(f"{upstream_base}/api/v2/images/img-1").mock(
+        return_value=Response(200, json={"id": "img-1", "name": "sunset.jpg"})
+    )
+    client = TestClient(app)
+    resp = client.get("/gallery/image/img-1/full")
+
+    assert resp.status_code == 200
+    assert "content-disposition" not in resp.headers
+    assert full.called
+    assert not meta.called
+
+
+@respx.mock
+def test_download_sets_attachment_with_real_filename(app, upstream_base):
+    respx.get(f"{upstream_base}/api/v2/images/img-1/full").mock(
+        return_value=Response(200, content=b"FULL", headers={"content-type": "image/jpeg"})
+    )
+    respx.get(f"{upstream_base}/api/v2/images/img-1").mock(
+        return_value=Response(200, json={"id": "img-1", "name": "sunset.jpg"})
+    )
+    client = TestClient(app)
+    resp = client.get("/gallery/image/img-1/full", params={"download": 1})
+
+    assert resp.status_code == 200
+    assert resp.content == b"FULL"
+    assert resp.headers["content-type"] == "image/jpeg"
+    disposition = resp.headers["content-disposition"]
+    assert disposition.startswith("attachment;")
+    assert 'filename="sunset.jpg"' in disposition
+    assert "filename*=UTF-8''sunset.jpg" in disposition
+
+
+@respx.mock
+def test_download_keeps_cache_headers(app, upstream_base):
+    respx.get(f"{upstream_base}/api/v2/images/img-1/full").mock(
+        return_value=Response(
+            200,
+            content=b"FULL",
+            headers={
+                "content-type": "image/jpeg",
+                "cache-control": "public, max-age=31536000, immutable",
+                "etag": '"abc123"',
+            },
+        )
+    )
+    respx.get(f"{upstream_base}/api/v2/images/img-1").mock(
+        return_value=Response(200, json={"id": "img-1", "name": "sunset.jpg"})
+    )
+    client = TestClient(app)
+    resp = client.get("/gallery/image/img-1/full", params={"download": "true"})
+
+    assert resp.headers.get("cache-control") == "public, max-age=31536000, immutable"
+    assert resp.headers.get("etag") == '"abc123"'
+
+
+@respx.mock
+def test_download_non_ascii_filename_is_encoded(app, upstream_base):
+    respx.get(f"{upstream_base}/api/v2/images/img-1/full").mock(
+        return_value=Response(200, content=b"FULL", headers={"content-type": "image/jpeg"})
+    )
+    respx.get(f"{upstream_base}/api/v2/images/img-1").mock(
+        return_value=Response(200, json={"id": "img-1", "name": "Café façade.jpg"})
+    )
+    client = TestClient(app)
+    resp = client.get("/gallery/image/img-1/full", params={"download": 1})
+
+    disposition = resp.headers["content-disposition"]
+    # ASCII fallback for old clients, exact UTF-8 name for current browsers.
+    assert 'filename="Caf_ fa_ade.jpg"' in disposition
+    assert "filename*=UTF-8''Caf%C3%A9%20fa%C3%A7ade.jpg" in disposition
+
+
+@respx.mock
+def test_download_sanitizes_unsafe_filename_characters(app, upstream_base):
+    respx.get(f"{upstream_base}/api/v2/images/img-1/full").mock(
+        return_value=Response(200, content=b"FULL", headers={"content-type": "image/jpeg"})
+    )
+    respx.get(f"{upstream_base}/api/v2/images/img-1").mock(
+        return_value=Response(200, json={"id": "img-1", "name": '../trip/beach: "day 1"?.jpg'})
+    )
+    client = TestClient(app)
+    resp = client.get("/gallery/image/img-1/full", params={"download": 1})
+
+    disposition = resp.headers["content-disposition"]
+    # Path parts dropped; characters invalid on Windows replaced; no raw
+    # quote can break out of the header's quoted filename.
+    assert 'filename="beach_ _day 1__.jpg"' in disposition
+    assert ".." not in disposition
+    assert "/" not in disposition.split("filename*=")[0]
+
+
+@respx.mock
+def test_download_falls_back_to_uuid_name_when_metadata_unavailable(app, upstream_base):
+    respx.get(f"{upstream_base}/api/v2/images/img-1/full").mock(
+        return_value=Response(200, content=b"PNG", headers={"content-type": "image/png"})
+    )
+    respx.get(f"{upstream_base}/api/v2/images/img-1").mock(
+        return_value=Response(404, json={"code": "IMAGE_NOT_FOUND"})
+    )
+    client = TestClient(app)
+    resp = client.get("/gallery/image/img-1/full", params={"download": 1})
+
+    # A metadata failure must not block the download itself.
+    assert resp.status_code == 200
+    assert resp.content == b"PNG"
+    assert 'filename="img-1.png"' in resp.headers["content-disposition"]
+
+
+@respx.mock
+def test_download_upstream_image_error_propagates_status(app, upstream_base):
+    respx.get(f"{upstream_base}/api/v2/images/missing/full").mock(
+        return_value=Response(404, text="not found")
+    )
+    client = TestClient(app)
+    resp = client.get("/gallery/image/missing/full", params={"download": 1})
+
+    assert resp.status_code == 404
+    assert "content-disposition" not in resp.headers
+
+
+@respx.mock
+def test_full_image_varies_on_origin(app, upstream_base):
+    # Regression guard: without Vary: Origin, a browser that first loads
+    # the image without CORS (page background) caches a copy with no
+    # Access-Control-Allow-Origin header, then reuses it for the lightbox's
+    # CORS request in share mode and blocks it -- the photo fails to load
+    # and Save fails on phones.
+    respx.get(f"{upstream_base}/api/v2/images/img-1/full").mock(
+        return_value=Response(
+            200,
+            content=b"FULL",
+            headers={"content-type": "image/jpeg", "cache-control": "public, max-age=31536000, immutable"},
+        )
+    )
+    client = TestClient(app)
+
+    no_cors = client.get("/gallery/image/img-1/full")
+    with_cors = client.get("/gallery/image/img-1/full", headers={"Origin": "http://gallery.test"})
+
+    for resp in (no_cors, with_cors):
+        vary = [v.strip().lower() for v in resp.headers.get("vary", "").split(",")]
+        assert "origin" in vary
+    assert with_cors.headers.get("access-control-allow-origin") in ("*", "http://gallery.test")
+
+
+def test_download_rejects_invalid_flag_value(app):
+    client = TestClient(app)
+    resp = client.get("/gallery/image/img-1/full", params={"download": "banana"})
+
+    assert resp.status_code == 422
 
 
 @respx.mock

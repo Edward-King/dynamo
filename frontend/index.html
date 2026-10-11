@@ -28,6 +28,24 @@
 <div id="lightbox" class="lightbox-modal" role="dialog" aria-modal="true" aria-label="Image viewer">
     <button id="closeBtn" class="lightbox-close" aria-label="Close">&times;</button>
 
+    <!-- Download / Save. Label and icon are switched by script.js:
+         "Download" (tray icon) on desktop and on devices without a share
+         sheet; "Save" (share icon) on touch devices that can share files,
+         where it opens the system share sheet ("Save Image" to Photos on
+         iOS). The text label is hidden on narrow screens -- see style.css. -->
+    <button id="downloadBtn" class="lightbox-download" type="button" aria-label="Download image" title="Download (D)">
+        <svg class="lightbox-download-icon icon-download" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 3v12m0 0l-5-5m5 5l5-5M4 17v3h16v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <svg class="lightbox-download-icon icon-share" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 15V3m0 0L8 7m4-4l4 4M7 10H5v11h14V10h-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span id="downloadLabel" class="lightbox-download-label">Download</span>
+    </button>
+
+    <!-- Short-lived feedback for download/save ("Download started", errors). -->
+    <div id="lightboxNotice" class="lightbox-notice" role="status" aria-live="polite"></div>
+
     <button id="prevBtn" class="lightbox-btn lightbox-prev" aria-label="Previous image">&#10094;</button>
     <button id="nextBtn" class="lightbox-btn lightbox-next" aria-label="Next image">&#10095;</button>
 

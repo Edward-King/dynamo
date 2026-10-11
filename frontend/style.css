@@ -465,6 +465,135 @@ body.has-bg-image::before {
     color: #cccccc;
 }
 
+/* Download / Save button. Always visible (never hover-revealed) so it works
+   the same with touch, mouse, and keyboard. Sits left of the close button
+   with a clear gap so a tap meant for one doesn't hit the other. */
+.lightbox-download {
+    position: absolute;
+    top: 18px;
+    right: 84px;
+    z-index: 100000;
+    display: -webkit-inline-box;
+    display: inline-flex;
+    -webkit-box-align: center;
+    align-items: center;
+    -webkit-box-pack: center;
+    justify-content: center;
+    gap: 8px;
+    /* 44x44 minimum: Apple HIG 44pt; Android's 48dp is met on phones below. */
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 16px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    font: inherit;
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-transition: background-color 0.15s ease, opacity 0.15s ease;
+    transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.lightbox-download-icon {
+    width: 22px;
+    height: 22px;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+}
+
+/* Tray icon for file downloads; share icon where the button opens the
+   system share sheet. script.js adds .share-mode. */
+.lightbox-download .icon-share { display: none; }
+.lightbox-download.share-mode .icon-download { display: none; }
+.lightbox-download.share-mode .icon-share { display: block; }
+
+/* Hover styling only on devices that really hover, so a tap on a phone
+   doesn't leave the button stuck looking highlighted (Safari sticky hover). */
+@media (hover: hover) {
+    .lightbox-download:hover {
+        background: rgba(255, 255, 255, 0.24);
+    }
+}
+
+.lightbox-download:active {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.lightbox-download:focus-visible {
+    outline: 2px solid #ffffff;
+    outline-offset: 2px;
+}
+
+.lightbox-download.is-busy {
+    opacity: 0.6;
+    cursor: progress;
+}
+
+/* Short status message for download/save. Ignores pointer input so it can
+   never block a tap on the photo or the controls. */
+.lightbox-notice {
+    position: absolute;
+    left: 50%;
+    bottom: 24px;
+    z-index: 100000;
+    /* Size to the message (an absolutely positioned box at left: 50% would
+       otherwise shrink to half the screen and wrap short messages). */
+    width: -webkit-max-content;
+    width: max-content;
+    max-width: 90vw;
+    padding: 10px 18px;
+    border-radius: 8px;
+    background: rgba(20, 20, 20, 0.92);
+    color: #ffffff;
+    font-size: 0.95rem;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    -webkit-transform: translateX(-50%);
+    transform: translateX(-50%);
+    -webkit-transition: opacity 0.2s ease;
+    transition: opacity 0.2s ease;
+}
+
+.lightbox-notice.is-visible {
+    opacity: 1;
+}
+
+.lightbox-notice.is-error {
+    background: rgba(140, 30, 30, 0.95);
+}
+
+/* Phones: icon only (the button keeps its aria-label for screen readers),
+   and a 48px square to meet Android's touch-target guidance too. */
+@media screen and (max-width: 600px) {
+    .lightbox-download {
+        top: 14px;
+        right: 76px;
+        width: 48px;
+        height: 48px;
+        padding: 0;
+        border-radius: 50%;
+    }
+
+    .lightbox-download-label {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .lightbox-download,
+    .lightbox-notice {
+        -webkit-transition: none;
+        transition: none;
+    }
+}
+
 @-webkit-keyframes scaleUp {
     from { -webkit-transform: scale(0.7); opacity: 0; }
     to { -webkit-transform: scale(1); opacity: 1; }
