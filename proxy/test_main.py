@@ -354,6 +354,41 @@ def test_download_falls_back_to_uuid_name_when_metadata_unavailable(app, upstrea
 
 
 @respx.mock
+def test_download_falls_back_when_metadata_lookup_times_out(app, upstream_base):
+    # Regression guard (PR #1 review, bug 1): a timeout on the filename
+    # lookup used to escape as a 500 even though the image bytes were fine.
+    import httpx
+
+    respx.get(f"{upstream_base}/api/v2/images/img-1/full").mock(
+        return_value=Response(200, content=b"FULL", headers={"content-type": "image/jpeg"})
+    )
+    respx.get(f"{upstream_base}/api/v2/images/img-1").mock(side_effect=httpx.ReadTimeout("slow"))
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/gallery/image/img-1/full", params={"download": 1})
+
+    assert resp.status_code == 200
+    assert resp.content == b"FULL"
+    assert 'filename="img-1.jpg"' in resp.headers["content-disposition"]
+
+
+@respx.mock
+def test_download_falls_back_when_metadata_connection_drops(app, upstream_base):
+    # Same guard for a transport error other than a timeout or refused
+    # connection (e.g. PhotoShare closing the connection mid-response).
+    import httpx
+
+    respx.get(f"{upstream_base}/api/v2/images/img-1/full").mock(
+        return_value=Response(200, content=b"FULL", headers={"content-type": "image/jpeg"})
+    )
+    respx.get(f"{upstream_base}/api/v2/images/img-1").mock(side_effect=httpx.ReadError("reset"))
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/gallery/image/img-1/full", params={"download": 1})
+
+    assert resp.status_code == 200
+    assert 'filename="img-1.jpg"' in resp.headers["content-disposition"]
+
+
+@respx.mock
 def test_download_upstream_image_error_propagates_status(app, upstream_base):
     respx.get(f"{upstream_base}/api/v2/images/missing/full").mock(
         return_value=Response(404, text="not found")

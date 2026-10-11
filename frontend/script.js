@@ -472,19 +472,28 @@ function hideNotice() {
     if (dom.lightboxNotice) dom.lightboxNotice.classList.remove('is-visible');
 }
 
+// How long a download frame is kept before it's removed. Removing it while
+// the response headers are still arriving can cancel the download in some
+// browsers, so this is generous; the frame is invisible and tiny meanwhile.
+const DOWNLOAD_FRAME_LIFETIME_MS = 60000;
+
 function startFileDownload(item) {
-    // The proxy's attachment header makes the browser save the file and stay
-    // on this page. The `download` attribute is a bonus for deployments that
-    // serve the frontend and proxy from the same origin.
+    // The download runs in a hidden iframe rather than by following a link
+    // in this page. On success the proxy's attachment header makes the
+    // browser save the file either way. On failure (e.g. a 502 while
+    // PhotoShare is down) the error response isn't an attachment, so a link
+    // would have navigated the whole gallery to a raw JSON error page; in an
+    // iframe it loads out of sight and the gallery stays where it was.
+    // A new frame per download avoids the browser ignoring a repeat of the
+    // same URL.
     const sep = item.full_url.includes('?') ? '&' : '?';
-    const link = document.createElement('a');
-    link.href = `${PROXY_BASE_URL}${item.full_url}${sep}download=1`;
-    link.download = downloadFilename(item, item.mime_type);
-    link.rel = 'noopener';
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    const frame = document.createElement('iframe');
+    frame.className = 'download-frame';
+    frame.setAttribute('aria-hidden', 'true');
+    frame.tabIndex = -1;
+    frame.src = `${PROXY_BASE_URL}${item.full_url}${sep}download=1`;
+    document.body.appendChild(frame);
+    setTimeout(() => frame.remove(), DOWNLOAD_FRAME_LIFETIME_MS);
 
     // The browser doesn't report where (or whether) the file was saved, so
     // the message stays neutral. The short busy window stops double taps

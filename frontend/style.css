@@ -465,6 +465,19 @@ body.has-bg-image::before {
     color: #cccccc;
 }
 
+/* Hidden frames that run file downloads (see startFileDownload in
+   script.js). Kept in the layout but zero-sized and off-screen, rather than
+   display: none, so every browser still loads them. */
+.download-frame {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    width: 0;
+    height: 0;
+    border: 0;
+    visibility: hidden;
+}
+
 /* Download / Save button. Always visible (never hover-revealed) so it works
    the same with touch, mouse, and keyboard. Sits left of the close button
    with a clear gap so a tap meant for one doesn't hit the other. */

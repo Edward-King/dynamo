@@ -307,13 +307,20 @@ def _content_disposition_attachment(filename: str) -> str:
 async def _lookup_image_name(img_uuid: str) -> str | None:
     """Fetch the image's real filename from PhotoShare's metadata route.
 
-    Best-effort: any failure (unknown id, upstream error, malformed body)
-    returns None and the caller falls back to a UUID-based filename, so a
-    metadata hiccup never blocks the download itself.
+    Best-effort: any failure (unknown id, upstream error, timeout, dropped
+    connection, malformed body) returns None and the caller falls back to a
+    UUID-based filename, so a metadata hiccup never blocks the download
+    itself.
     """
     try:
         resp = await _upstream_get(f"/api/v2/images/{img_uuid}")
     except HTTPException:
+        # _upstream_get turns connection failures into a 502 HTTPException.
+        return None
+    except httpx.HTTPError:
+        # Everything _upstream_get doesn't convert: timeouts, read/protocol
+        # errors, etc. Without this, a slow metadata lookup turned an
+        # otherwise successful download into a 500.
         return None
     if resp.status_code >= 400:
         return None

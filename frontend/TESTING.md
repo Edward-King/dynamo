@@ -27,6 +27,9 @@ non-ASCII name such as `Café.jpg` is useful).
 | D10 | Android Chrome | Open a photo, tap the button | Share sheet opens (includes saving/Downloads options) |
 | D11 | Android Firefox | Open a photo, tap the button | Direct download to Downloads (Firefox Android has no file sharing; expected) |
 | D12 | Any device | Tap/click the button twice quickly | Only one download / one share sheet |
+| D13 | Any desktop browser | Open a photo, stop PhotoShare (leave the proxy running), click **Download** | No file is saved, and the gallery stays on screen with the lightbox open (it must not switch to an error page) |
+| D14 | Any desktop browser | Download the same photo twice, a few seconds apart | Two downloads (the second isn't silently ignored) |
+| D15 | iPad Safari with a trackpad or Magic Keyboard attached (button reads **Download**) | Open a photo, tap **Download** | Safari offers the file as a download (saved to Files), and the gallery stays on screen. This is the same download path iPhone falls back to if the share sheet can't open |
 
 ## Must still work (existing behavior)
 
