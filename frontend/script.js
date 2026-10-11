@@ -396,6 +396,13 @@ let shareFileCache = { id: null, file: null, promise: null, controller: null };
 let downloadBusy = false;
 let noticeTimer = null;
 
+// True once the bootstrap has found the Download button, its label and the
+// notice area in the page. If any is missing -- e.g. a browser still has an
+// older cached index.html from before the button existed, paired with this
+// newer script -- the download feature switches itself off instead of
+// throwing, so the rest of the gallery keeps working.
+let downloadAvailable = false;
+
 function detectShareMode() {
     if (typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') return false;
     if (typeof File !== 'function' || !window.matchMedia) return false;
@@ -436,7 +443,7 @@ function prepareShareFile(item) {
     // Only the photo on screen is prepared: moving to another photo (or
     // closing the lightbox) cancels the previous photo's request if it's
     // still running, so quick swiping doesn't pile up full-size downloads.
-    if (!SHARE_MODE || !item || shareFileCache.id === item.id) return;
+    if (!downloadAvailable || !SHARE_MODE || !item || shareFileCache.id === item.id) return;
     releaseShareFile();
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     const entry = { id: item.id, file: null, promise: null, controller };
@@ -463,12 +470,14 @@ function releaseShareFile() {
 
 function setDownloadBusy(busy) {
     downloadBusy = busy;
+    if (!dom.downloadBtn) return;
     dom.downloadBtn.classList.toggle('is-busy', busy);
     dom.downloadBtn.setAttribute('aria-busy', busy ? 'true' : 'false');
 }
 
 function showNotice(message, isError) {
     clearTimeout(noticeTimer);
+    if (!dom.lightboxNotice) return;
     dom.lightboxNotice.textContent = message;
     dom.lightboxNotice.classList.toggle('is-error', !!isError);
     dom.lightboxNotice.classList.add('is-visible');
@@ -569,7 +578,7 @@ async function shareImage(item) {
 
 function handleDownload() {
     const item = currentImages[currentIndex];
-    if (!item || downloadBusy) return;
+    if (!downloadAvailable || !item || downloadBusy) return;
     if (SHARE_MODE) shareImage(item);
     else startFileDownload(item);
 }
@@ -634,8 +643,14 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.prevBtn.addEventListener('click', (e) => { e.stopPropagation(); navigateLightbox(-1); });
     dom.nextBtn.addEventListener('click', (e) => { e.stopPropagation(); navigateLightbox(1); });
     dom.closeBtn.addEventListener('click', closeLightbox);
-    dom.downloadBtn.addEventListener('click', (e) => { e.stopPropagation(); handleDownload(); });
-    configureDownloadButton();
+    downloadAvailable = !!(dom.downloadBtn && dom.downloadLabel && dom.lightboxNotice);
+    if (downloadAvailable) {
+        dom.downloadBtn.addEventListener('click', (e) => { e.stopPropagation(); handleDownload(); });
+        configureDownloadButton();
+    } else {
+        // Page markup is older than this script (see downloadAvailable).
+        console.warn('Download button not found in the page; download is unavailable until the page is reloaded.');
+    }
 
     initSwipeGestures();
 

@@ -31,6 +31,19 @@ non-ASCII name such as `Café.jpg` is useful).
 | D14 | Any desktop browser | Download the same photo twice, a few seconds apart | Two downloads (the second isn't silently ignored) |
 | D15 | iPad Safari with a trackpad or Magic Keyboard attached (button reads **Download**) | Open a photo, tap **Download** | Safari offers the file as a download (saved to Files), and the gallery stays on screen. This is the same download path iPhone falls back to if the share sheet can't open |
 
+## Caching after deploys
+
+Run on the real server, through Apache (not a local static server). Replace
+`gallery.example.com` with the real hostname.
+
+| # | Check | Expected |
+|---|---|---|
+| C1 | `curl -sI https://gallery.example.com/ \| grep -i cache-control` | `Cache-Control: no-cache` |
+| C2 | View the page source; check the `style.css`, `common.js` and `script.js` links. Then `curl -sI` one of those URLs exactly as written | Each link ends in `?v=` plus 12 characters (0-9, a-f); the response has `Cache-Control: public, max-age=31536000, immutable` |
+| C3 | Desktop browser, DevTools Network tab with **Disable cache** off: load the gallery, open About, return to the gallery | The page itself shows **304**; CSS/JS show "(memory cache)" or "(disk cache)" |
+| C4 | Change `script.js` on the server, re-run `stamp_assets.py`, then just click a link back to the gallery (no hard refresh) | Only `script.js` is fetched, with a new `?v=` tag; the change is live |
+| C5 | With a browser that last loaded the site before this change, visit once | The gallery loads normally (an older cached page with a newer script must not leave a blank gallery) |
+
 ## Must still work (existing behavior)
 
 | # | Check | Expected |
