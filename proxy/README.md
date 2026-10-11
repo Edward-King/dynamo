@@ -87,11 +87,17 @@ to the proxy over plain, keyless routes.
 
 The test suite (`test_main.py` / `conftest.py`) covers every route above,
 including the portfolio/image URL-rewrite logic, pagination params, error
-pass-through, and the `/gallery/health` check. It mocks the upstream
-PhotoShare server with [respx](https://lundberg.github.io/respx/), so it
-runs fully offline -- no real `config.json` or running PhotoShare server
-is needed (a throwaway one is generated for the test run and any existing
-`config.json` is safely restored afterwards).
+pass-through, the `?download=1` file-download option (filename choice,
+safe/encoded names, fallbacks, concurrent filename lookup), and the
+`/gallery/health` check. It mocks the upstream PhotoShare server with
+[respx](https://lundberg.github.io/respx/), so it runs fully offline --
+no real `config.json` or running PhotoShare server is needed (a throwaway
+one is generated for the test run and any existing `config.json` is
+safely restored afterwards).
+
+The same suite runs automatically on GitHub (Python 3.12 and 3.14) for
+every pull request and push to `main` that touches `proxy/` -- see
+`.github/workflows/proxy-tests.yml`.
 
 ```bash
 pip install -r requirements-dev.txt
@@ -108,4 +114,13 @@ pytest -v
 | GET | `/gallery/portfolios/{id}/images` | `GET /api/v2/portfolios/{id}/images` |
 | GET | `/gallery/image/{id}/thumb` | `GET /api/v2/images/{id}/thumb` |
 | GET | `/gallery/image/{id}/full` | `GET /api/v2/images/{id}/full` |
+| GET | `/gallery/image/{id}/full?download=1` | `GET /api/v2/images/{id}/full` + `GET /api/v2/images/{id}` (for the filename) |
 | GET | `/gallery/health` | (none — proxy's own health check) |
+
+With `?download=1`, the full image is sent with
+`Content-Disposition: attachment` and the image's real filename, so the
+browser saves it instead of displaying it. The gallery's lightbox
+Download button uses this; without the parameter the response is
+unchanged. Full-image responses also carry `Vary: Origin` so browsers
+cache CORS and non-CORS copies separately (see the comment in
+`stream_full_image`).

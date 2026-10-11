@@ -21,6 +21,9 @@ Routes exposed to the frontend (all safe, no API key required from callers):
   GET /gallery/portfolios/{port_uuid}/images     -> images in a portfolio (paginated)
   GET /gallery/image/{img_uuid}/thumb            -> streamed thumbnail bytes
   GET /gallery/image/{img_uuid}/full             -> streamed full-resolution bytes
+      ?download=1                                   (optional) same bytes, sent as a
+                                                    file download with the image's
+                                                    real filename
 
 Every route above forwards to the equivalent PhotoShare /api/v2 route,
 attaching X-API-Key from server-side config. Responses are passed through
@@ -33,10 +36,14 @@ or key at all.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import mimetypes
 import os
+import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query
@@ -255,19 +262,127 @@ async def stream_thumbnail(img_uuid: str, width: int = 320, height: int = 240):
     )
 
 
-@app.get("/gallery/image/{img_uuid}/full")
-async def stream_full_image(img_uuid: str):
-    resp = await _upstream_get(f"/api/v2/images/{img_uuid}/full")
+# Characters that are unsafe or meaningless in a downloaded filename on at
+# least one major OS (Windows is the strictest: <>:"/\|?* plus control
+# characters). Replaced rather than dropped so names stay recognizable.
+_UNSAFE_FILENAME_CHARS = re.compile(r'[\x00-\x1f\x7f<>:"/\\|?*]')
+
+
+def _safe_download_filename(name: str | None, img_uuid: str, content_type: str) -> str:
+    """Pick the filename a browser should save a downloaded image as.
+
+    Prefers the image's real name from PhotoShare's metadata (e.g.
+    "sunset.jpg"). Falls back to "<uuid><ext>" -- extension guessed from
+    the upstream Content-Type -- when no usable name is available. The name
+    always comes from PhotoShare, never from the request, so a caller can't
+    choose what the file is called.
+    """
+    cleaned = ""
+    if name:
+        # Keep only the last path component (rel_path-style names shouldn't
+        # reach us, but be defensive), then neutralize unsafe characters.
+        cleaned = name.replace("\\", "/").rsplit("/", 1)[-1]
+        cleaned = _UNSAFE_FILENAME_CHARS.sub("_", cleaned).strip(" .")
+    if not cleaned:
+        ext = mimetypes.guess_extension(content_type.split(";")[0].strip()) or ".jpg"
+        # mimetypes maps image/jpeg to ".jpg" on 3.12+, but older tables
+        # return ".jpe"; normalize to the extension people expect.
+        if ext == ".jpe":
+            ext = ".jpg"
+        cleaned = f"{img_uuid}{ext}"
+    return cleaned
+
+
+def _content_disposition_attachment(filename: str) -> str:
+    """Build an RFC 6266 attachment header that works across browsers.
+
+    `filename=` carries an ASCII-only fallback (non-ASCII replaced with
+    "_") for older clients; `filename*=` carries the exact UTF-8 name,
+    which every current browser (Chrome, Firefox, Safari, Edge, mobile)
+    prefers when present.
+    """
+    ascii_fallback = filename.encode("ascii", "replace").decode("ascii").replace("?", "_")
+    return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
+
+
+async def _lookup_image_name(img_uuid: str) -> str | None:
+    """Fetch the image's real filename from PhotoShare's metadata route.
+
+    Best-effort: any failure (unknown id, upstream error, timeout, dropped
+    connection, malformed body) returns None and the caller falls back to a
+    UUID-based filename, so a metadata hiccup never blocks the download
+    itself.
+    """
+    try:
+        resp = await _upstream_get(f"/api/v2/images/{img_uuid}")
+    except HTTPException:
+        # _upstream_get turns connection failures into a 502 HTTPException.
+        return None
+    except httpx.HTTPError:
+        # Everything _upstream_get doesn't convert: timeouts, read/protocol
+        # errors, etc. Without this, a slow metadata lookup turned an
+        # otherwise successful download into a 500.
+        return None
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return None
+    try:
+        name = resp.json().get("name")
+    except (ValueError, AttributeError):
+        return None
+    return name if isinstance(name, str) else None
+
+
+@app.get("/gallery/image/{img_uuid}/full")
+async def stream_full_image(img_uuid: str, download: bool = Query(False)):
+    """Stream the full-resolution original.
+
+    With `?download=1` the same bytes are sent with a
+    `Content-Disposition: attachment` header so the browser saves the file
+    (using the image's real name) instead of displaying it. This is needed
+    because the gallery frontend and this proxy are on different origins,
+    and browsers ignore the HTML `download` attribute on cross-origin links.
+    Without the parameter the response is unchanged.
+
+    For downloads, the filename lookup runs at the same time as the image
+    fetch rather than after it, so it adds no extra wait. If the image
+    fetch fails, the lookup is cancelled.
+    """
+    name_task: asyncio.Task[str | None] | None = None
+    if download:
+        name_task = asyncio.create_task(_lookup_image_name(img_uuid))
+    try:
+        resp = await _upstream_get(f"/api/v2/images/{img_uuid}/full")
+        if resp.status_code >= 400:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    except BaseException:
+        if name_task is not None:
+            name_task.cancel()
+        raise
+    content_type = resp.headers.get("content-type", "image/jpeg")
+    headers = {
+        k: v
+        for k, v in resp.headers.items()
+        if k.lower() in ("cache-control", "etag", "last-modified")
+    }
+    # The same full image is requested both without CORS (the page's dimmed
+    # background, plain <img> loads) and with CORS (the lightbox in share
+    # mode, which reads the bytes to hand to the share sheet). With
+    # cors_allow_origins = ["*"] the CORS middleware only adds
+    # Access-Control-Allow-Origin when the request carries an Origin header,
+    # and doesn't add Vary. Combined with PhotoShare's immutable
+    # Cache-Control, a browser would reuse the cached non-CORS copy for the
+    # CORS request and block it. Vary: Origin tells caches to keep the two
+    # apart. (Starlette already adds Vary: Origin when a specific origin list
+    # is configured; this makes the "*" case behave the same.)
+    headers["Vary"] = "Origin"
+    if name_task is not None:
+        name = await name_task
+        filename = _safe_download_filename(name, img_uuid, content_type)
+        headers["Content-Disposition"] = _content_disposition_attachment(filename)
     return StreamingResponse(
         iter([resp.content]),
-        media_type=resp.headers.get("content-type", "image/jpeg"),
-        headers={
-            k: v
-            for k, v in resp.headers.items()
-            if k.lower() in ("cache-control", "etag", "last-modified")
-        },
+        media_type=content_type,
+        headers=headers,
     )
 
 

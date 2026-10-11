@@ -11,6 +11,7 @@
 //   GET  /gallery/portfolios/{id}/images
 //   GET  /gallery/image/{id}/thumb
 //   GET  /gallery/image/{id}/full
+//   GET  /gallery/image/{id}/full?download=1   (saved as a file, real filename)
 //
 // Navigation model: a breadcrumb trail of portfolios the user has drilled
 // into, starting at root. Clicking a folder tile pushes onto the trail and
@@ -295,11 +296,17 @@ function updateLightboxContent() {
     dom.lightboxImg.src = `${PROXY_BASE_URL}${item.full_url}`;
     dom.lightboxImg.alt = caption;
     dom.lightboxCaption.textContent = caption;
+
+    // On share-sheet devices, get the file ready now so a tap on Save can
+    // open the share sheet immediately (see prepareShareFile).
+    prepareShareFile(item);
 }
 
 function closeLightbox() {
     dom.lightbox.style.display = 'none';
     document.body.style.overflow = '';
+    releaseShareFile();
+    hideNotice();
 
     if (lastFocusedThumbnail) {
         const thumbnail = lastFocusedThumbnail;
@@ -356,6 +363,230 @@ function isLightboxOpen() {
     return dom.lightbox.style.display === 'flex';
 }
 
+// ---------------------------------------------------------------------------
+// Download / Save
+//
+// Two paths, chosen once per page load by what the browser can do (never by
+// user-agent sniffing):
+//
+//   * Share mode -- the main input is touch with no hover (phones, most
+//     tablets) AND the browser can share files (Web Share API Level 2: iOS/
+//     iPadOS Safari, Android Chrome). The button reads "Save" and opens the
+//     system share sheet, where iOS offers "Save Image" to Photos. A plain
+//     download on iOS would land in the Files app instead, which isn't where
+//     people look for photos.
+//
+//   * Download mode -- everything else (desktop browsers on macOS, Windows,
+//     Linux; touch devices without file sharing). The button reads
+//     "Download" and points the browser at /full?download=1, where the proxy
+//     sends Content-Disposition: attachment with the image's real filename.
+//     The proxy has to do this because the gallery and proxy are on different
+//     origins and browsers ignore the HTML `download` attribute cross-origin.
+//
+// Long-press ("Save to Photos" / "Download image") and right-click ("Save
+// Image As...") on the lightbox photo are deliberately left alone: nothing
+// here blocks the context menu or covers the image.
+// ---------------------------------------------------------------------------
+
+const SHARE_MODE = detectShareMode();
+
+// The prepared File for the image currently in the lightbox (share mode only).
+// Holding at most one at a time keeps memory bounded on phones.
+let shareFileCache = { id: null, file: null, promise: null, controller: null };
+let downloadBusy = false;
+let noticeTimer = null;
+
+function detectShareMode() {
+    if (typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') return false;
+    if (typeof File !== 'function' || !window.matchMedia) return false;
+    // Touch-first only: an iPad with a trackpad or a touchscreen laptop with a
+    // mouse reports hover support and gets the normal file download.
+    const touchFirst = window.matchMedia('(pointer: coarse)').matches &&
+        !window.matchMedia('(hover: hover)').matches;
+    if (!touchFirst) return false;
+    try {
+        return navigator.canShare({ files: [new File([''], 'probe.jpg', { type: 'image/jpeg' })] });
+    } catch (_) {
+        return false;
+    }
+}
+
+function downloadFilename(item, mimeType) {
+    // Mirrors the proxy's _safe_download_filename: last path component, with
+    // characters that are invalid on some OS (Windows is strictest) replaced.
+    const name = (item.name || '')
+        .split(/[\\/]/).pop()
+        .replace(/[\x00-\x1f\x7f<>:"/\\|?*]/g, '_')
+        .replace(/^[\s.]+|[\s.]+$/g, '');
+    if (name) return name;
+    let ext = ((mimeType || 'image/jpeg').split('/')[1] || 'jpg').split(';')[0];
+    if (ext === 'jpeg') ext = 'jpg';
+    return `${item.id}.${ext}`;
+}
+
+function prepareShareFile(item) {
+    // Safari only opens the share sheet while it still counts the tap as
+    // "recent". Downloading the photo after the tap can take long enough to
+    // lose that, so in share mode the file is fetched as soon as the photo is
+    // shown. The lightbox <img> uses the same CORS request (crossOrigin is set
+    // at startup in share mode) and the proxy forwards PhotoShare's immutable
+    // Cache-Control, so this is normally served from the browser cache rather
+    // than downloaded a second time.
+    //
+    // Only the photo on screen is prepared: moving to another photo (or
+    // closing the lightbox) cancels the previous photo's request if it's
+    // still running, so quick swiping doesn't pile up full-size downloads.
+    if (!SHARE_MODE || !item || shareFileCache.id === item.id) return;
+    releaseShareFile();
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const entry = { id: item.id, file: null, promise: null, controller };
+    entry.promise = fetch(`${PROXY_BASE_URL}${item.full_url}`, controller ? { signal: controller.signal } : {})
+        .then((res) => {
+            if (!res.ok) throw new Error(`Image request failed (${res.status})`);
+            return res.blob();
+        })
+        .then((blob) => {
+            const type = blob.type || item.mime_type || 'image/jpeg';
+            entry.file = new File([blob], downloadFilename(item, type), { type });
+            return entry.file;
+        });
+    // Errors are reported when the user actually taps Save, not here.
+    entry.promise.catch(() => {});
+    shareFileCache = entry;
+}
+
+function releaseShareFile() {
+    // Cancel the request if it hasn't finished; harmless if it has.
+    if (shareFileCache.controller && !shareFileCache.file) shareFileCache.controller.abort();
+    shareFileCache = { id: null, file: null, promise: null, controller: null };
+}
+
+function setDownloadBusy(busy) {
+    downloadBusy = busy;
+    dom.downloadBtn.classList.toggle('is-busy', busy);
+    dom.downloadBtn.setAttribute('aria-busy', busy ? 'true' : 'false');
+}
+
+function showNotice(message, isError) {
+    clearTimeout(noticeTimer);
+    dom.lightboxNotice.textContent = message;
+    dom.lightboxNotice.classList.toggle('is-error', !!isError);
+    dom.lightboxNotice.classList.add('is-visible');
+    noticeTimer = setTimeout(hideNotice, isError ? 4000 : 2500);
+}
+
+function hideNotice() {
+    clearTimeout(noticeTimer);
+    if (dom.lightboxNotice) dom.lightboxNotice.classList.remove('is-visible');
+}
+
+// How long a download frame is kept before it's removed. Removing it while
+// the response headers are still arriving can cancel the download in some
+// browsers, so this is generous; the frame is invisible and tiny meanwhile.
+const DOWNLOAD_FRAME_LIFETIME_MS = 60000;
+
+function startFileDownload(item) {
+    // The download runs in a hidden iframe rather than by following a link
+    // in this page. On success the proxy's attachment header makes the
+    // browser save the file either way. On failure (e.g. a 502 while
+    // PhotoShare is down) the error response isn't an attachment, so a link
+    // would have navigated the whole gallery to a raw JSON error page; in an
+    // iframe it loads out of sight and the gallery stays where it was.
+    // A new frame per download avoids the browser ignoring a repeat of the
+    // same URL.
+    const sep = item.full_url.includes('?') ? '&' : '?';
+    const frame = document.createElement('iframe');
+    frame.className = 'download-frame';
+    frame.setAttribute('aria-hidden', 'true');
+    frame.tabIndex = -1;
+    frame.src = `${PROXY_BASE_URL}${item.full_url}${sep}download=1`;
+    document.body.appendChild(frame);
+    setTimeout(() => frame.remove(), DOWNLOAD_FRAME_LIFETIME_MS);
+
+    // The browser doesn't report where (or whether) the file was saved, so
+    // the message stays neutral. The short busy window stops double taps
+    // from starting two downloads of a large original.
+    showNotice('Download started');
+    setDownloadBusy(true);
+    setTimeout(() => setDownloadBusy(false), 1500);
+}
+
+async function shareImage(item) {
+    prepareShareFile(item);
+    const entry = shareFileCache;
+    // startFileDownload manages its own busy window; don't cut it short.
+    let fellBackToDownload = false;
+    setDownloadBusy(true);
+    try {
+        // If the file is already prepared there is no await before share(),
+        // so the tap still counts as the user's action.
+        let file = entry.file;
+        if (!file) {
+            try {
+                file = await entry.promise;
+            } catch (prepareErr) {
+                if (prepareErr && prepareErr.name === 'AbortError') {
+                    // The user swiped to another photo or closed the
+                    // lightbox while it was being prepared -- nothing to do.
+                    return;
+                }
+                // Couldn't get the photo ready for the share sheet (e.g. a
+                // network hiccup). Rather than just showing an error, fall
+                // back to a regular download, which is a separate request.
+                console.warn('Could not prepare photo for sharing; downloading instead.', prepareErr);
+                if (shareFileCache === entry) releaseShareFile();
+                fellBackToDownload = true;
+                startFileDownload(item);
+                return;
+            }
+        }
+        if (!navigator.canShare({ files: [file] })) {
+            fellBackToDownload = true;
+            startFileDownload(item);
+            return;
+        }
+        await navigator.share({ files: [file], title: file.name });
+    } catch (err) {
+        const name = err && err.name;
+        if (name === 'AbortError') {
+            // User closed the share sheet -- not an error.
+        } else if (name === 'NotAllowedError') {
+            // The browser no longer treated this as a tap (slow network while
+            // preparing the file). Fall back to a regular download.
+            fellBackToDownload = true;
+            startFileDownload(item);
+        } else {
+            // The share sheet itself failed (the photo was ready).
+            console.error(err);
+            showNotice("Couldn't save. Try again.", true);
+            // Drop the failed attempt so the next tap fetches afresh.
+            if (shareFileCache === entry) releaseShareFile();
+        }
+    } finally {
+        if (!fellBackToDownload) setDownloadBusy(false);
+    }
+}
+
+function handleDownload() {
+    const item = currentImages[currentIndex];
+    if (!item || downloadBusy) return;
+    if (SHARE_MODE) shareImage(item);
+    else startFileDownload(item);
+}
+
+function configureDownloadButton() {
+    dom.downloadBtn.classList.toggle('share-mode', SHARE_MODE);
+    dom.downloadLabel.textContent = SHARE_MODE ? 'Save' : 'Download';
+    dom.downloadBtn.setAttribute('aria-label', SHARE_MODE ? 'Save image' : 'Download image');
+    dom.downloadBtn.title = SHARE_MODE ? 'Save image' : 'Download (D)';
+    if (SHARE_MODE) {
+        // Lets prepareShareFile reuse the image the lightbox already loaded.
+        // Safe because every gallery request already depends on the proxy's
+        // CORS settings allowing this page.
+        dom.lightboxImg.crossOrigin = 'anonymous';
+    }
+}
+
 function initSwipeGestures() {
     let touchStartX = 0;
     const SWIPE_THRESHOLD = 40;
@@ -390,6 +621,9 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.prevBtn = document.getElementById('prevBtn');
     dom.nextBtn = document.getElementById('nextBtn');
     dom.closeBtn = document.getElementById('closeBtn');
+    dom.downloadBtn = document.getElementById('downloadBtn');
+    dom.downloadLabel = document.getElementById('downloadLabel');
+    dom.lightboxNotice = document.getElementById('lightboxNotice');
 
     if (!dom.grid || !dom.lightbox) return;
 
@@ -400,6 +634,8 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.prevBtn.addEventListener('click', (e) => { e.stopPropagation(); navigateLightbox(-1); });
     dom.nextBtn.addEventListener('click', (e) => { e.stopPropagation(); navigateLightbox(1); });
     dom.closeBtn.addEventListener('click', closeLightbox);
+    dom.downloadBtn.addEventListener('click', (e) => { e.stopPropagation(); handleDownload(); });
+    configureDownloadButton();
 
     initSwipeGestures();
 
@@ -408,6 +644,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'ArrowLeft') navigateLightbox(-1);
         else if (e.key === 'ArrowRight') navigateLightbox(1);
         else if (e.key === 'Escape') closeLightbox();
+        else if ((e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            // Plain D only -- Ctrl/Cmd+D is the browser's bookmark shortcut.
+            e.preventDefault();
+            handleDownload();
+        }
     });
 
     initGallery();
