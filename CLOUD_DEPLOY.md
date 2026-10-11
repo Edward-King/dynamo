@@ -125,7 +125,10 @@ if you ever delete or recreate that directory.
 
 ```bash
 sudo mkdir -p /var/www/photoshare-gallery /var/www/photoshare-admin
-sudo cp -r frontend/*      /var/www/photoshare-gallery/
+# Gallery: copy only the site files (not TESTING.md or the stamping tool),
+# then tag the CSS/JS links so browsers pick up new versions after deploys.
+sudo cp frontend/{index.html,about.html,script.js,style.css,common.js} /var/www/photoshare-gallery/
+sudo python3 frontend/stamp_assets.py /var/www/photoshare-gallery
 sudo cp -r admin-frontend/* /var/www/photoshare-admin/
 
 sudo cp apache/photoshare-gallery.conf /etc/apache2/sites-available/
@@ -177,6 +180,13 @@ real photo library and the admin UI's health badge is green.
 - **Redeploy after a code change:** `docker compose build && docker compose
   up -d` — the backend's `PHOTOSHARE_CACHE_ROOT` directory on the host is
   untouched, so existing API keys keep working.
+- **Redeploy the gallery frontend:** copy the site files as in step 5, then
+  always re-run `sudo python3 frontend/stamp_assets.py
+  /var/www/photoshare-gallery`. The vhost lets browsers cache tagged CSS/JS
+  for a year, so the tags must be refreshed whenever those files change.
+  Skipping it is safe but slower: untagged files are re-checked on every
+  visit. Pages (HTML) are always re-checked, so visitors never need a hard
+  refresh after a deploy.
 - **Rescans:** the backend's `rescan.on_startup: true` default (in
   `backend/config.prod.yaml`) means every restart rescans the whole photo
   tree; combined with `server.workers: 4` that's 4 redundant rescans per
