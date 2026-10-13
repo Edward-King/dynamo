@@ -118,6 +118,6 @@ Manually verified end-to-end against a mock backend implementing the same
 cleanup, root change) round-trip correctly through the admin frontend →
 this proxy → backend → back to the UI, with the backend-health badge
 correctly reflecting reachability. Not yet tested against the real
-PhotoShare backend or inside an actual Docker container — see the project
-knowledge wiki's "known blockers" for outstanding validation work shared
-with the data-plane proxy.
+PhotoShare backend or inside an actual Docker container at the time.
+Both were later validated as part of the full Compose stack (see
+`OVERVIEW.md`, Step 3).

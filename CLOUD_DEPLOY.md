@@ -235,8 +235,13 @@ customised any:
 
 ```bash
 cd /opt/photoshare
-sudo tar czf ~/photoshare-backup-$(date +%Y%m%d-%H%M).tgz -C /opt photoshare
+BACKUP=~/photoshare-backup-$(date +%Y%m%d-%H%M).tgz
+sudo tar czf "$BACKUP" -C /opt photoshare
+sudo chmod 600 "$BACKUP"    # it contains .env and the API-key store
 sudo chown -R "$USER": /opt/photoshare
+# The line above also re-owns the cache/logs folders if they live here;
+# hand them back to the container's uid 1000:
+for d in cache logs; do [ -d "$d" ] && sudo chown -R 1000:1000 "$d"; done
 git init -q
 git remote add origin https://github.com/Edward-King/dynamo.git
 git fetch -q origin main
@@ -246,7 +251,11 @@ git status --short    # only server-only files (if any) should be listed
 
 If your `.env` was created before `PHOTOSHARE_CACHE_ROOT` /
 `PHOTOSHARE_LOG_ROOT` existed, compare it with `.env.example` and add any
-missing variables.
+missing variables. Very early installs kept the cache in Docker named
+volumes instead: if `docker volume ls` lists PhotoShare cache or log
+volumes, copy their contents into the new host folders before running
+`docker compose up -d`, or the backend starts with an empty key store and
+you'll need to issue new API keys (step 4).
 
 ### Every update
 
