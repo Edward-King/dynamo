@@ -1,16 +1,20 @@
 # PhotoShare — Cloud Server Deployment Guide
 
-Step-by-step instructions for deploying this bundle on a real Ubuntu 22
+Step-by-step instructions for deploying this repository on a real Ubuntu 22
 cloud server. Everything here has been build-and-test validated end-to-end
-against a real Docker daemon in a sandbox (see `README.md` and the project
-wiki for what was tested); the steps below are what's left to run on your
-actual infrastructure.
+against a real Docker daemon in a sandbox (see `OVERVIEW.md` for what was
+tested); the steps below are what's left to run on your actual
+infrastructure. Already running an older install? Skip to
+[Updating an existing deployment](#updating-an-existing-deployment).
 
 ## Target architecture
 
-- Two containers reachable only from Apache2: `data-proxy` (public gallery
-  API) and `admin-proxy` (rescan/preheat/cleanup/root-change API). Both are
-  published to `127.0.0.1` only, never to `0.0.0.0`.
+- Two proxy containers that Apache2 forwards to: `data-proxy` (public
+  gallery API, port 8100) and `admin-proxy` (rescan/preheat/cleanup/
+  root-change API, port 8200). As shipped, `docker-compose.yml` publishes
+  both ports on **all** host interfaces so you can reach them directly while
+  debugging. Lock them down to `127.0.0.1` once the stack works; see
+  [Lock down the proxy ports](#lock-down-the-proxy-ports).
 - One `backend` container, not published to the host at all — only the two
   proxies can reach it, over the internal Compose network.
 - Apache2 on the host serves both static frontends directly from disk and
@@ -44,13 +48,20 @@ actual infrastructure.
    server's public IP before running certbot — e.g.
    `gallery.example.com` and `admin.example.com`.
 
-## 1. Copy this bundle to the server
+## 1. Get the code onto the server
 
 ```bash
-scp -r deployment/ user@your-server:/opt/photoshare
 ssh user@your-server
+sudo git clone https://github.com/Edward-King/dynamo.git /opt/photoshare
+sudo chown -R "$USER": /opt/photoshare
 cd /opt/photoshare
 ```
+
+The repository root is the Compose project directory: `docker-compose.yml`,
+`.env.example`, `apache/`, `frontend/` and the service folders all sit
+directly under `/opt/photoshare`. Installing from a git checkout (rather
+than a copied folder) makes later updates a `git pull`. Your `.env` is
+gitignored, so pulls never touch it.
 
 ## 2. Configure environment variables
 
@@ -136,8 +147,9 @@ sudo cp apache/photoshare-admin.conf   /etc/apache2/sites-available/
 ```
 
 Edit both files under `/etc/apache2/sites-available/` and replace the
-placeholder `ServerName` values (`gallery.example.com`,
-`admin.example.com`) with your real hostnames, then:
+placeholder `ServerName` values (`gallery.example.com` in the gallery
+vhost, `admin.photoshare.example.com` in the admin vhost) with your real
+hostnames, then:
 
 ```bash
 sudo a2ensite photoshare-gallery photoshare-admin
@@ -151,10 +163,16 @@ sudo systemctl reload apache2
 sudo certbot --apache -d gallery.example.com -d admin.example.com
 ```
 
-Certbot rewrites both vhosts in place to add matching `:443` blocks and
-(by default) redirect `:80` to HTTPS. Neither container needs any change —
-they only ever see plain HTTP from Apache2, which still terminates TLS in
-front of them.
+Certbot copies each vhost into a new HTTPS file
+(`photoshare-gallery-le-ssl.conf`, `photoshare-admin-le-ssl.conf`) with a
+matching `:443` block, and (by default) adds a redirect from `:80` to HTTPS
+to the original file. Neither container needs any change — they only ever
+see plain HTTP from Apache2, which still terminates TLS in front of them.
+
+From now on, real traffic is served by the `-le-ssl.conf` copies. Any later
+change to a vhost in this repo (for example the gallery caching rules) must
+be applied to **both** the original file and its `-le-ssl.conf` copy; see
+[Updating an existing deployment](#updating-an-existing-deployment).
 
 ## 7. Verify
 
@@ -170,23 +188,137 @@ curl -s -X POST https://admin.example.com/admin/rescan \
   -H "X-API-Key: <your ADMIN_PROXY_API_KEY>"
 ```
 
+Check the lightbox download option (pick any real image ID from the
+gallery, e.g. from the browser's Network tab):
+
+```bash
+ID=<image-id>
+curl -sI "https://gallery.example.com/gallery/image/$ID/full?download=1" \
+  | grep -i -E '^(HTTP|content-disposition|vary)'
+#   expect: 200, Content-Disposition: attachment; filename="...", Vary: Origin
+curl -sI "https://gallery.example.com/gallery/image/$ID/full" \
+  | grep -i -E '^(content-disposition|vary)'
+#   expect: Vary: Origin only (normal viewing has no Content-Disposition)
+```
+
+Check the frontend caching rules:
+
+```bash
+curl -sI https://gallery.example.com/ | grep -i cache-control
+#   expect: Cache-Control: no-cache
+TAGGED=$(grep -o 'script.js?v=[0-9a-f]*' /var/www/photoshare-gallery/index.html); echo "$TAGGED"
+#   expect: script.js?v= followed by 12 hex characters
+curl -sI "https://gallery.example.com/$TAGGED" | grep -i cache-control
+#   expect: Cache-Control: public, max-age=31536000, immutable
+```
+
+If the first `curl` shows no `Cache-Control` header, the caching rules are
+missing from the HTTPS vhost (`photoshare-gallery-le-ssl.conf`).
+
 Then load both hostnames in a browser and confirm the gallery renders your
-real photo library and the admin UI's health badge is green.
+real photo library and the admin UI's health badge is green. Open a photo
+and use the lightbox's Download button (on a phone, Save should open the
+share sheet). `frontend/TESTING.md` has the full manual checklist.
+
+## Updating an existing deployment
+
+Use this after new changes are merged to `main`.
+
+### Once: switch an older install to a git checkout
+
+Installs made with the older `scp -r deployment/` instructions are plain
+copies with no git history. Turn the folder into a checkout in place,
+after backing it up. `.env` and other gitignored or server-only files are
+left alone, but any files you edited on the server that also exist in the
+repo are replaced with the repo version, so check the backup if you
+customised any:
+
+```bash
+cd /opt/photoshare
+sudo tar czf ~/photoshare-backup-$(date +%Y%m%d-%H%M).tgz -C /opt photoshare
+sudo chown -R "$USER": /opt/photoshare
+git init -q
+git remote add origin https://github.com/Edward-King/dynamo.git
+git fetch -q origin main
+git checkout -f -B main origin/main
+git status --short    # only server-only files (if any) should be listed
+```
+
+If your `.env` was created before `PHOTOSHARE_CACHE_ROOT` /
+`PHOTOSHARE_LOG_ROOT` existed, compare it with `.env.example` and add any
+missing variables.
+
+### Every update
+
+1. **Pull and rebuild the containers.** Only services whose code changed
+   are rebuilt and restarted; the cache directory and API keys are
+   untouched.
+   ```bash
+   cd /opt/photoshare
+   OLD=$(git rev-parse HEAD)
+   git pull --ff-only
+   git log --oneline "$OLD"..HEAD        # what changed
+   docker compose build
+   docker compose up -d
+   docker compose ps                     # wait for all three to be healthy
+   ```
+2. **Redeploy both frontends**, then re-tag the gallery's CSS/JS. Always
+   run `stamp_assets.py` after copying: the vhost lets browsers keep tagged
+   CSS/JS for a year, so the tags must change whenever those files do.
+   Pages (HTML) are always re-checked, so visitors never need a hard
+   refresh.
+   ```bash
+   sudo cp frontend/{index.html,about.html,script.js,style.css,common.js} /var/www/photoshare-gallery/
+   sudo python3 frontend/stamp_assets.py /var/www/photoshare-gallery
+   sudo cp -r admin-frontend/* /var/www/photoshare-admin/
+   ```
+   Plain `cp` (not `rsync --delete`) keeps server-only files in the web root,
+   such as your own About-page photo. If you skip stamping, nothing breaks;
+   untagged files are just re-checked on every visit.
+3. **Apply any vhost changes by hand.** Your installed vhosts have your
+   real `ServerName` and certbot's additions, so don't overwrite them with
+   the repo copies. See what changed, then make the same edit in both the
+   original file and its `-le-ssl.conf` copy:
+   ```bash
+   git diff "$OLD"..HEAD -- apache/
+   sudo nano /etc/apache2/sites-available/photoshare-gallery.conf
+   sudo nano /etc/apache2/sites-available/photoshare-gallery-le-ssl.conf
+   sudo apache2ctl configtest   # must say "Syntax OK"
+   sudo systemctl reload apache2
+   ```
+4. **Verify** with the checks in step 7.
+
+### Upgrading to the lightbox download and caching changes
+
+If your server predates the lightbox download option
+([PR #1](https://github.com/Edward-King/dynamo/pull/1)) and the frontend
+caching rules ([PR #2](https://github.com/Edward-King/dynamo/pull/2)), the
+steps above cover it:
+
+- Step 1 rebuilds `data-proxy` (new `?download=1` option and `Vary: Origin`
+  header). The backend, admin proxy and `.env` don't change.
+- Step 2 deploys the new gallery files and tags them.
+- Step 3: add the caching block from `apache/photoshare-gallery.conf` (the
+  part starting at `# --- Browser caching` and ending with the
+  `RequestHeader edit "If-None-Match"` line) just before `</Directory>`
+  inside `<Directory /var/www/photoshare-gallery>`, in both gallery vhost
+  files. If the `-le-ssl.conf` file has no `<Directory>` section, copy the
+  whole `<Directory /var/www/photoshare-gallery>` section into its `:443`
+  `VirtualHost`. Confirm both files have it:
+  ```bash
+  grep -c "Header set Cache-Control" /etc/apache2/sites-available/photoshare-gallery*.conf
+  #   expect: 3 for each file
+  ```
+  `mod_headers` is already enabled by the prerequisites.
 
 ## Ongoing operations
 
 - **Logs:** `docker compose logs -f backend` (or `data-proxy` /
   `admin-proxy`).
-- **Redeploy after a code change:** `docker compose build && docker compose
-  up -d` — the backend's `PHOTOSHARE_CACHE_ROOT` directory on the host is
-  untouched, so existing API keys keep working.
-- **Redeploy the gallery frontend:** copy the site files as in step 5, then
-  always re-run `sudo python3 frontend/stamp_assets.py
-  /var/www/photoshare-gallery`. The vhost lets browsers cache tagged CSS/JS
-  for a year, so the tags must be refreshed whenever those files change.
-  Skipping it is safe but slower: untagged files are re-checked on every
-  visit. Pages (HTML) are always re-checked, so visitors never need a hard
-  refresh after a deploy.
+- **Updates:** see
+  [Updating an existing deployment](#updating-an-existing-deployment). The
+  backend's `PHOTOSHARE_CACHE_ROOT` directory on the host is untouched by
+  rebuilds, so existing API keys keep working.
 - **Rescans:** the backend's `rescan.on_startup: true` default (in
   `backend/config.prod.yaml`) means every restart rescans the whole photo
   tree; combined with `server.workers: 4` that's 4 redundant rescans per
@@ -196,10 +328,26 @@ real photo library and the admin UI's health badge is green.
   make sure that uid has read access to whatever real path you set as
   `PHOTOSHARE_PHOTOS_ROOT`.
 
+## Lock down the proxy ports
+
+Once everything works through Apache2, stop publishing the proxy ports on
+the public interface. In `docker-compose.yml`, change:
+
+```yaml
+      - "8100:8100"    # data-proxy  ->  - "127.0.0.1:8100:8100"
+      - "8200:8200"    # admin-proxy ->  - "127.0.0.1:8200:8200"
+```
+
+then run `docker compose up -d`. Apache2 still reaches both on
+`127.0.0.1`, so nothing else changes. Don't rely on `ufw` for this: ports
+published by Docker bypass `ufw` rules. Since this edits a tracked file,
+`git pull` will refuse to update it if the repo version also changes; keep
+your edit with `git stash && git pull --ff-only && git stash pop`.
+
 ## What this guide does not cover
 
 Server provisioning/hardening, backup strategy for the
 `PHOTOSHARE_CACHE_ROOT` directory, and monitoring/alerting are all
 deliberately out of scope here — this covers only getting the PhotoShare
 stack itself running behind Apache2 with real data, real keys, and real
-TLS. See `todo.md` for the current outstanding checklist.
+TLS.
