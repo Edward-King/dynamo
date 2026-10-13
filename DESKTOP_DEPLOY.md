@@ -206,6 +206,12 @@ sudo cp apache/photoshare-gallery.conf /etc/apache2/sites-available/
 sudo cp apache/photoshare-admin.conf   /etc/apache2/sites-available/
 ```
 
+Do this even if `photoshare-gallery.conf` / `photoshare-admin.conf`
+already exist in `sites-available/` from an earlier bundle or install.
+Older copies may lack the browser-caching rules or point `DocumentRoot`
+somewhere else, and Apache2 will keep serving with them without any error.
+`cp` overwrites them; you'll set `ServerName` again below.
+
 Edit each copy and change only `ServerName`:
 
 - `photoshare-gallery.conf`: `ServerName gallery.local`
@@ -224,12 +230,64 @@ sudo apache2ctl configtest   # must say "Syntax OK"
 sudo systemctl reload apache2
 ```
 
-Quick check that the caching rules are active:
+### Verify the deployment
+
+Run these from your checkout. Each one prints a result, so a silent
+failure can't look like a pass.
+
+**1. Installed vhosts match the repo.** This compares each installed
+vhost with the repo copy, ignoring the `ServerName`/`ServerAlias` lines
+you edited:
 
 ```bash
-curl -sI http://gallery.local/ | grep -i cache-control
-#   expect: Cache-Control: no-cache
+for s in gallery admin; do
+  if diff <(grep -vE '^\s*(ServerName|ServerAlias)\b' apache/photoshare-$s.conf) \
+          <(grep -vE '^\s*(ServerName|ServerAlias)\b' /etc/apache2/sites-available/photoshare-$s.conf); then
+    echo "photoshare-$s.conf: matches repo"
+  else
+    echo "photoshare-$s.conf: DIFFERS from repo -- re-copy it (see above)"
+  fi
+done
 ```
+
+Any output other than `matches repo` means the installed file is stale or
+hand-edited. On Fedora/Arch, point the second path at your `httpd` copy;
+there, the `${APACHE_LOG_DIR}` replacement will show up as an expected
+difference.
+
+**2. Each hostname reaches the right vhost:**
+
+```bash
+sudo apache2ctl -S 2>/dev/null | grep -E 'namevhost (gallery|admin)\.local'
+```
+
+Both lines must name `sites-enabled/photoshare-gallery.conf` and
+`sites-enabled/photoshare-admin.conf`. If a hostname is missing, its
+`ServerName` wasn't changed, and Apache2 sends that host to
+`000-default.conf` instead. (Ignore the `AH00558 ... fully qualified domain
+name` warning. It's harmless, and `2>/dev/null` hides it.)
+
+**3. The gallery page is stamped and served with caching rules:**
+
+```bash
+grep -c '?v=' /var/www/photoshare-gallery/index.html
+#   expect: 3   (0 means stamp_assets.py wasn't run on this copy)
+stat -c 'on disk: %s bytes' /var/www/photoshare-gallery/index.html
+curl -sI http://gallery.local/ | grep -iE '^(cache-control|content-length):' \
+  || echo "no Cache-Control/Content-Length in reply -- see table below"
+#   expect: Cache-Control: no-cache
+#           Content-Length: <same number as "on disk">
+```
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Check 1 says `DIFFERS` | Old or edited vhost in `sites-available/` | Re-copy both vhosts, set `ServerName`, reload |
+| Check 2 is missing a hostname | `ServerName` still `*.example.com`, or site not enabled | Edit `ServerName`; `sudo a2ensite ...`; reload |
+| No `Cache-Control`, Content-Length differs from on-disk size | Request is served from a different `DocumentRoot` (often an old bundle folder) | Re-copy the vhosts (check 1) and reload |
+| No `Cache-Control`, sizes match | `mod_headers` off, or Apache2 not reloaded | `sudo a2enmod headers`; `sudo systemctl reload apache2` |
+| `grep -c` prints `0` | Gallery files copied but not stamped | Re-run `stamp_assets.py` on `/var/www/photoshare-gallery` |
+
+Re-run all three checks after any fix.
 
 ## 8. Use it
 
@@ -282,15 +340,20 @@ entirely if you only need access from the desktop itself.
   working. Always re-run `stamp_assets.py` after copying the gallery files.
   If `apache/` changed, apply the same edit to your installed vhost (or
   re-copy it and set `ServerName` again), then `sudo apache2ctl configtest
-  && sudo systemctl reload apache2`.
+  && sudo systemctl reload apache2`. Then run the three checks under
+  "Verify the deployment" in step 7. Check 1 compares against the repo
+  directly, so it also catches a vhost that was already stale before this
+  pull, which `git diff "$OLD"..HEAD` can't see.
 - **Coming from an older unzipped bundle:** clone the repo as in step 2,
   copy your existing `.env` into it (compare with `.env.example` and add
   any missing variables), run `docker compose down` in the old folder,
   then follow steps 6–7 from the new one. If your `.env` points the cache
   and logs at `~/photoshare-data` (step 3), API keys carry over; if it used
-  paths inside the old folder, copy those directories across first. If your old vhosts pointed
-  `DocumentRoot` at the bundle folder, switch them back to the
-  `/var/www/...` paths from step 7.
+  paths inside the old folder, copy those directories across first. Step 7
+  overwrites the old vhosts with the repo's copies. Don't keep or patch
+  the bundle-era files, which may lack the caching rules or point
+  `DocumentRoot` at the bundle folder. Finish with the checks under
+  "Verify the deployment".
 - **Restart everything after a reboot:** nothing to do manually — Docker
   starts on boot (step 1) and every service has `restart: unless-stopped`,
   so the stack comes back up on its own once the Docker daemon is
