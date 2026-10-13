@@ -78,7 +78,14 @@ The Apache2 commands in this guide (`a2enmod`, `a2ensite`,
 `sites-available/`, `/var/www`) use the Debian/Ubuntu layout. On Fedora or
 Arch the package is `httpd`: enable the same modules in its config, and
 put the two vhost files in `/etc/httpd/conf.d/` (Fedora) or include them
-from `/etc/httpd/conf/httpd.conf` (Arch) instead of using `a2ensite`.
+from `/etc/httpd/conf/httpd.conf` (Arch) instead of using `a2ensite`. Also:
+
+- Replace `${APACHE_LOG_DIR}` in both vhost files with a real log folder
+  (e.g. `/var/log/httpd`). That variable is only defined on Debian/Ubuntu,
+  and `httpd` won't start without it.
+- On Fedora/RHEL with SELinux enforcing, allow Apache to connect to the
+  proxy ports, or every `/gallery/*` and `/admin/*` request fails with a
+  503: `sudo setsebool -P httpd_can_network_connect 1`.
 
 ## 2. Get the code onto the machine
 
