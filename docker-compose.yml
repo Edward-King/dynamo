@@ -42,7 +42,7 @@ services:
     ports:
       - "8100:8100"
     environment:
-      - GALLERY_PROXY_API_KEY=${GALLERY_PROXY_API_KEY:?set GALLERY_PROXY_API_KEY in .env -- see deployment/README.md}
+      - GALLERY_PROXY_API_KEY=${GALLERY_PROXY_API_KEY:?set GALLERY_PROXY_API_KEY in .env -- see CLOUD_DEPLOY.md}
       - GALLERY_PROXY_BASE_URL=http://backend:8000
       - GALLERY_PROXY_CORS_ORIGINS=${GALLERY_PROXY_CORS_ORIGINS:-}
     depends_on:
@@ -63,7 +63,7 @@ services:
     ports:
       - "8200:8200"
     environment:
-      - ADMIN_PROXY_API_KEY=${ADMIN_PROXY_API_KEY:?set ADMIN_PROXY_API_KEY in .env -- see deployment/README.md}
+      - ADMIN_PROXY_API_KEY=${ADMIN_PROXY_API_KEY:?set ADMIN_PROXY_API_KEY in .env -- see CLOUD_DEPLOY.md}
       - ADMIN_PROXY_BASE_URL=http://backend:8000
       - ADMIN_PROXY_CORS_ORIGINS=${ADMIN_PROXY_CORS_ORIGINS:-}
     depends_on:
