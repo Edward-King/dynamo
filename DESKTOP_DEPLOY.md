@@ -17,20 +17,25 @@ trick the frontends rely on — only the environment changes:
 
 ## 1. Prerequisites
 
-**Docker Engine + the Compose plugin.** Package manager varies by distro
-family:
+**Docker Engine + the Compose plugin.** Package names vary by distro:
 
 ```bash
-# Debian/Ubuntu-family (apt)
+# Ubuntu (distro packages; the Compose plugin is called docker-compose-v2)
 sudo apt update
-sudo apt install -y docker.io docker-compose-plugin
+sudo apt install -y docker.io docker-compose-v2
 
-# Fedora/RHEL-family (dnf)
-sudo dnf install -y docker docker-compose-plugin
+# Debian, Fedora/RHEL and others: Docker's own packages
+# (installs docker-ce plus docker-compose-plugin)
+curl -fsSL https://get.docker.com | sudo sh
 
 # Arch-family (pacman)
 sudo pacman -S docker docker-compose
+
+docker compose version   # must work (with a space) before continuing
 ```
+
+`docker-compose-plugin` only exists in Docker's own repository, so
+`apt install docker-compose-plugin` fails on a stock Ubuntu install.
 
 Add yourself to the `docker` group so you don't need `sudo` for every
 `docker compose` command, then start a new shell session (or log out/in)
@@ -60,14 +65,27 @@ from the cloud guide for the cache/log directories below.
 
 **Apache2**, for the same-origin reverse proxy the frontends expect
 (`common.js`/`admin.js` use a relative `PROXY_BASE_URL` — see
-`README.md` — which only works when the frontend HTML and its proxy are
+`OVERVIEW.md` — which only works when the frontend HTML and its proxy are
 served from the same origin):
 
 ```bash
-sudo apt install -y apache2       # or dnf/pacman equivalent
+sudo apt install -y apache2
 sudo a2enmod proxy proxy_http headers
 sudo systemctl enable --now apache2
 ```
+
+The Apache2 commands in this guide (`a2enmod`, `a2ensite`,
+`sites-available/`, `/var/www`) use the Debian/Ubuntu layout. On Fedora or
+Arch the package is `httpd`: enable the same modules in its config, and
+put the two vhost files in `/etc/httpd/conf.d/` (Fedora) or include them
+from `/etc/httpd/conf/httpd.conf` (Arch) instead of using `a2ensite`. Also:
+
+- Replace `${APACHE_LOG_DIR}` in both vhost files with a real log folder
+  (e.g. `/var/log/httpd`). That variable is only defined on Debian/Ubuntu,
+  and `httpd` won't start without it.
+- On Fedora/RHEL with SELinux enforcing, allow Apache to connect to the
+  proxy ports, or every `/gallery/*` and `/admin/*` request fails with a
+  503: `sudo setsebool -P httpd_can_network_connect 1`.
 
 ## 2. Get the code onto the machine
 

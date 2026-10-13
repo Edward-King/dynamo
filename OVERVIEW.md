@@ -1,15 +1,15 @@
 # PhotoShare Cloud Deployment — Working Tree
 
-This folder holds the editable source used to containerize PhotoShare's
-backend + proxy for an Ubuntu 22 cloud server, with the frontend served by
-the server's native Apache2. It is separate from the original snapshot
-archives at the repo root (`PhotoShare Gallery Backend.zip` /
-`Frontend.zip` / `Proxy.zip`), which remain as the historical reference
-copies delivered at project start.
+This repository holds the editable source used to containerize
+PhotoShare's backend + proxies for an Ubuntu 22 cloud server, with the
+frontends served by the server's native Apache2. It started as the
+`deployment/` folder of an earlier working tree, alongside the original
+snapshot archives (`PhotoShare Gallery Backend.zip` / `Frontend.zip` /
+`Proxy.zip`), which are not part of this repository.
 
-See the project knowledge wiki (`projects/photoshare-docker-deployment.md`)
-for the full architecture, decisions, and rationale. This README only
-tracks what's been done here and what's still pending.
+This file is a history of what was built and validated. For the
+architecture see `docs/`; to deploy, see `CLOUD_DEPLOY.md` or
+`DESKTOP_DEPLOY.md`.
 
 ## Status (2026-08-17) — Step 3 of 3: full integration validated locally in a sandbox
 
