@@ -71,19 +71,21 @@ sudo systemctl enable --now apache2
 
 ## 2. Get the code onto the machine
 
-Unzip `PhotoShare-Deployment-Bundle.zip` wherever you keep local projects,
-e.g.:
+Clone the repository wherever you keep local projects, e.g.:
 
 ```bash
-mkdir -p ~/photoshare
-unzip PhotoShare-Deployment-Bundle.zip -d ~/photoshare
-cd ~/photoshare/deployment
+git clone https://github.com/Edward-King/dynamo.git ~/photoshare
+cd ~/photoshare
 ```
+
+The repository root is the Compose project directory (`docker-compose.yml`,
+`.env.example`, `apache/`, `frontend/`, ...). Your `.env` is gitignored, so
+later `git pull`s never touch it.
 
 ## 3. Create the persistent host directories
 
-Keep these outside the project folder itself so re-unzipping a future
-bundle version never touches them:
+Keep these outside the project folder itself so they stay separate from
+the code you pull and rebuild:
 
 ```bash
 mkdir -p ~/photoshare-data/cache ~/photoshare-data/logs
@@ -144,9 +146,13 @@ docker compose up -d
 docker compose ps       # all three services should show healthy
 ```
 
-The proxies publish on `127.0.0.1:8100` (data-proxy) and
-`127.0.0.1:8200` (admin-proxy) — loopback-only by default, matching the
-compose file's port bindings.
+The proxies publish on port `8100` (data-proxy) and `8200` (admin-proxy).
+As shipped, `docker-compose.yml` publishes them on **all** interfaces, so
+other machines on your network can reach them directly (they still need
+the API keys). To keep them on this machine only, change the two `ports`
+entries to `"127.0.0.1:8100:8100"` and `"127.0.0.1:8200:8200"` and run
+`docker compose up -d` again. Apache2 reaches them on `127.0.0.1` either
+way.
 
 ## 7. Configure Apache2 vhosts for local access
 
@@ -158,36 +164,63 @@ domains in production. Add to `/etc/hosts`:
 127.0.0.1   gallery.local admin.local
 ```
 
-Copy the two vhost files and point their `DocumentRoot`s at this checkout:
+Copy both frontends into Apache2's web root (the same paths the vhosts
+already use), then tag the gallery's CSS/JS links so browsers pick up new
+versions after each update:
+
+```bash
+sudo mkdir -p /var/www/photoshare-gallery /var/www/photoshare-admin
+sudo cp frontend/{index.html,about.html,script.js,style.css,common.js} /var/www/photoshare-gallery/
+sudo python3 frontend/stamp_assets.py /var/www/photoshare-gallery
+sudo cp -r admin-frontend/* /var/www/photoshare-admin/
+```
+
+Serve copies rather than pointing `DocumentRoot` at your checkout: the
+gallery vhost's permissions and browser-caching rules are attached to
+`<Directory /var/www/photoshare-gallery>`, `frontend/` in the repo also
+holds the stamping tool and its tests, and stamping rewrites `index.html`,
+which would leave your checkout modified.
+
+Copy the two vhost files:
 
 ```bash
 sudo cp apache/photoshare-gallery.conf /etc/apache2/sites-available/
 sudo cp apache/photoshare-admin.conf   /etc/apache2/sites-available/
 ```
 
-Edit each copy:
+Edit each copy and change only `ServerName`:
 
-- `photoshare-gallery.conf`: `ServerName gallery.local`,
-  `DocumentRoot /home/<you>/photoshare/deployment/frontend`
-- `photoshare-admin.conf`: `ServerName admin.local`,
-  `DocumentRoot /home/<you>/photoshare/deployment/admin-frontend`
+- `photoshare-gallery.conf`: `ServerName gallery.local`
+- `photoshare-admin.conf`: `ServerName admin.local`
 
-Both already `ProxyPass` to the correct loopback ports (8100/8200) —
-no changes needed there since we didn't remap the published ports.
-Ignore the TLS/certbot comments in both files entirely; this is plain
-HTTP on your own machine, no certificate needed.
+Both already `ProxyPass` to the correct loopback ports (8100/8200) and use
+the `/var/www/...` document roots above. Ignore the TLS/certbot comments in
+both files entirely; this is plain HTTP on your own machine, no certificate
+needed.
 
 Enable and reload:
 
 ```bash
 sudo a2ensite photoshare-gallery photoshare-admin
+sudo apache2ctl configtest   # must say "Syntax OK"
 sudo systemctl reload apache2
+```
+
+Quick check that the caching rules are active:
+
+```bash
+curl -sI http://gallery.local/ | grep -i cache-control
+#   expect: Cache-Control: no-cache
 ```
 
 ## 8. Use it
 
 - Gallery: [http://gallery.local](http://gallery.local)
 - Admin: [http://admin.local](http://admin.local)
+
+Open a photo and use the lightbox's Download button to save it with its
+original filename (press `D` as a shortcut). `frontend/TESTING.md` has the
+full manual checklist, including phones.
 
 ## Optional: LAN access from other devices
 
@@ -206,16 +239,40 @@ network instead of just this machine:
 
 This exposes the gallery to your whole LAN with no authentication in
 front of Apache2 itself — the API-key checks still protect the proxies,
-but anyone on your network can load the frontend. Skip this section
+but anyone on your network can load the frontend. Ports 8100/8200 are also
+reachable from the LAN unless you bound them to `127.0.0.1` in step 6;
+Docker-published ports bypass `ufw`, so the firewall rule above doesn't
+cover them. Skip this section
 entirely if you only need access from the desktop itself.
 
 ## Day-to-day operations
 
 - **Logs:** `docker compose logs -f backend` (or `data-proxy` /
   `admin-proxy`).
-- **Redeploy after a code change:** `docker compose build && docker compose
-  up -d` — `~/photoshare-data/cache` is untouched, so existing API keys
-  keep working.
+- **Update to the latest code:**
+  ```bash
+  cd ~/photoshare
+  OLD=$(git rev-parse HEAD)
+  git pull --ff-only
+  docker compose build && docker compose up -d
+  sudo cp frontend/{index.html,about.html,script.js,style.css,common.js} /var/www/photoshare-gallery/
+  sudo python3 frontend/stamp_assets.py /var/www/photoshare-gallery
+  sudo cp -r admin-frontend/* /var/www/photoshare-admin/
+  git diff "$OLD"..HEAD -- apache/   # any vhost changes?
+  ```
+  `~/photoshare-data/cache` is untouched, so existing API keys keep
+  working. Always re-run `stamp_assets.py` after copying the gallery files.
+  If `apache/` changed, apply the same edit to your installed vhost (or
+  re-copy it and set `ServerName` again), then `sudo apache2ctl configtest
+  && sudo systemctl reload apache2`.
+- **Coming from an older unzipped bundle:** clone the repo as in step 2,
+  copy your existing `.env` into it (compare with `.env.example` and add
+  any missing variables), run `docker compose down` in the old folder,
+  then follow steps 6–7 from the new one. If your `.env` points the cache
+  and logs at `~/photoshare-data` (step 3), API keys carry over; if it used
+  paths inside the old folder, copy those directories across first. If your old vhosts pointed
+  `DocumentRoot` at the bundle folder, switch them back to the
+  `/var/www/...` paths from step 7.
 - **Restart everything after a reboot:** nothing to do manually — Docker
   starts on boot (step 1) and every service has `restart: unless-stopped`,
   so the stack comes back up on its own once the Docker daemon is

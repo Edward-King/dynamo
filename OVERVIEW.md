@@ -128,10 +128,29 @@ tracks what's been done here and what's still pending.
   the real hostnames are still outstanding — those need the actual target
   server and domains, which this sandbox doesn't have.
 
+## Since then (merged to `main`)
+
+- [x] **Lightbox download** ([PR #1](https://github.com/Edward-King/dynamo/pull/1)):
+  a Download/Save button in the gallery lightbox (share sheet on phones
+  that support it, file download elsewhere, `D` shortcut), backed by a new
+  `?download=1` option on the data-proxy's `/gallery/image/{id}/full` route
+  that sends the image's real filename. The data-proxy also sends
+  `Vary: Origin` on full images. Backend unchanged.
+- [x] **Frontend caching** ([PR #2](https://github.com/Edward-King/dynamo/pull/2)):
+  browser-caching rules in `apache/photoshare-gallery.conf`,
+  `frontend/stamp_assets.py` to tag CSS/JS links with a content hash after
+  each deploy, and a guard so a stale cached page can't break the gallery.
+  CI workflows in `.github/workflows/` run the proxy and stamping tests.
+- Deploying or upgrading either change: see `CLOUD_DEPLOY.md`
+  ("Updating an existing deployment") or `DESKTOP_DEPLOY.md`.
+
 ## Layout
 
+The repository root is the deployment folder (it was `deployment/` in the
+original bundle):
+
 ```
-deployment/
+dynamo/
   docker-compose.yml  three-service stack (step 3): backend, data-proxy,
                       admin-proxy
   .env.example        required env vars for docker-compose.yml (API keys,
@@ -145,14 +164,20 @@ deployment/
               PhotoShare Gallery Backend.zip) — this is docker-compose.yml's
               build context for the backend service
   proxy/      full working copy of the proxy service, modified for
-              containerization (this is the DATA-plane proxy)
-  frontend/   full gallery frontend (index.html, about.html, script.js,
-              style.css, common.js) — only common.js's PROXY_BASE_URL was
-              changed for containerization, the rest is unmodified
+              containerization (this is the DATA-plane proxy), plus its
+              pytest suite (test_main.py)
+  frontend/   gallery site files (index.html, about.html, script.js,
+              style.css, common.js), plus stamp_assets.py (CSS/JS version
+              tags, run on the deployed copy), its tests, and TESTING.md
+              (manual device checklist) — only the five site files are
+              deployed
   admin-proxy/    new admin-plane proxy service (step 2), forwards only
                   to /api/v2/admin/*, own Dockerfile + API key
   admin-frontend/ new minimal admin UI (step 2), standalone HTML/JS with
                   one form per admin operation plus a backend-health badge
+  .github/workflows/  CI for the proxy tests and the stamping-tool tests
+  docs/, utilities/   architecture docs and standalone helper tools
+                      (not part of the deployed stack)
 ```
 
 To actually run this stack: copy `.env.example` to `.env`, fill in the
