@@ -35,6 +35,10 @@ venv/
 # Logs and generated files
 *.log
 logs/
+# Backend cache/metadata bind mount (PHOTOSHARE_CACHE_ROOT) when it lives
+# inside the checkout. Anchored to the repo root so backend/photoshare/cache/
+# (source code) is not ignored.
+/cache/
 tmp/
 
 # Local databases and uploads, if they should not be versioned
