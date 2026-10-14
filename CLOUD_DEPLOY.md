@@ -320,6 +320,30 @@ steps above cover it:
   ```
   `mod_headers` is already enabled by the prerequisites.
 
+### Upgrading to the per-portfolio background
+
+[PR #7](https://github.com/Edward-King/dynamo/pull/7) makes the gallery's
+page background follow the open portfolio. It changes only the gallery's
+`common.js`, `script.js` and `style.css`:
+
+- Step 1: `git pull --ff-only` fetches the new files. No containers change,
+  so `docker compose build` has nothing to rebuild and `up -d` restarts
+  nothing. Running them anyway is harmless.
+- Step 2 is the one that matters: copy the gallery files and re-run
+  `stamp_assets.py`. Without the new tags, browsers that already cached
+  the old CSS/JS keep using it for up to a year.
+- Step 3: nothing to do. `git diff "$OLD"..HEAD -- apache/` prints nothing.
+- Confirm the new files are the ones being served:
+  ```bash
+  grep -c applyPortfolioBackground /var/www/photoshare-gallery/common.js /var/www/photoshare-gallery/script.js
+  #   expect: 1 or more for each file (0 means the old files are still deployed)
+  grep -o 'common.js?v=[0-9a-f]*' /var/www/photoshare-gallery/index.html /var/www/photoshare-gallery/about.html
+  #   expect: the same tag in both pages, different from before the update
+  ```
+  Then open the gallery and click into a portfolio: the dimmed background
+  changes to that portfolio's icon image. The Page background section of
+  `frontend/TESTING.md` has the full checklist.
+
 ## Ongoing operations
 
 - **Logs:** `docker compose logs -f backend` (or `data-proxy` /
