@@ -101,16 +101,27 @@ function setPageBackground(value) {
 }
 
 /**
- * Downloads an image off-screen and resolves once it's ready, so the page
- * can keep showing the old background until the new one can appear in one
- * step (no blank or half-loaded frame in between). The request is made the
- * same way the CSS background makes it (no CORS), so the browser reuses
- * this download from cache when the background is applied.
+ * Downloads and decodes an image off-screen and resolves once it's ready,
+ * so the page can keep showing the old background until the new one can
+ * appear in one step (no blank or half-loaded frame in between). Waiting
+ * for decode() as well as the download keeps a very large photo from
+ * stalling the page on the frame it appears. The request is made the same
+ * way the CSS background makes it (no CORS), so the browser reuses this
+ * download from cache when the background is applied.
  */
 function preloadImage(url) {
     return new Promise((resolve, reject) => {
         const img = new Image();
-        img.onload = () => resolve();
+        img.onload = () => {
+            // decode() is missing in some older browsers and can reject even
+            // for an image that loaded fine. Either way the download worked,
+            // so go ahead and show it.
+            if (typeof img.decode === 'function') {
+                img.decode().then(resolve, resolve);
+            } else {
+                resolve();
+            }
+        };
         img.onerror = () => reject(new Error(`could not load ${url}`));
         img.src = url;
     });

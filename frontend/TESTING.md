@@ -18,8 +18,8 @@ For the Page background section, also set up:
   to a photo that isn't its first one alphabetically (so you can tell the
   two apart)
 - **Plain**: a portfolio with photos but no `icon_dir`
-- **Empty A** and **Empty B**: two portfolios with no photos (they can be
-  side by side or one inside the other)
+- **Empty A**: a portfolio with no photos whose only content is
+  **Empty B**, a portfolio inside it that also has no photos
 - **Twin**: a portfolio inside Cover whose `icon_dir` points at Cover's
   icon image (a path relative to the library root, e.g. `Cover/sunset.jpg`)
 
@@ -54,7 +54,7 @@ DevTools (Elements > `body` > `--page-bg-image`).
 | B1 | Load the gallery | Background is the root portfolio's icon image (or its first photo if root has no `icon_dir`) |
 | B2 | Open **Cover** | Background changes to Cover's `icon_dir` photo, not its first photo |
 | B3 | Open **Plain** | Background changes to Plain's first photo |
-| B4 | Open **Empty A** | Background changes to the gray gradient; "This portfolio is empty." shows as before |
+| B4 | Open **Empty A**, then **Empty B** | Empty A: background changes to the gray gradient. Empty B: gradient stays and "This portfolio is empty." shows as before (Empty A doesn't show it, because it contains Empty B) |
 | B5 | From a nested portfolio, click a breadcrumb back to root, then one level down | Each step shows that portfolio's background; root's is restored at root |
 | B6 | Open **About Me**, then go back to the gallery | About shows root's background; the gallery shows root's again |
 | B7 | DevTools Network tab: reload the gallery and filter for `portfolios` | One request to `/gallery/portfolios/root` (the gallery's own) plus one to `/gallery/portfolios/<root id>` (the background). There's no second `/gallery/portfolios/root` request |
@@ -83,6 +83,7 @@ overlap. Pick portfolios with different contents so you can tell them apart.
 | P2 | Same as P1, Network tab, filter for `full` | Cover's full image is downloaded once (the preload). Any second entry for it is served from memory or disk cache, not downloaded again |
 | P3 | DevTools Network request blocking: add the pattern `*/full`. Open Plain | Background changes to the gradient (not stuck on the old image, not blank); folder icons and photo thumbnails still load. Remove the block afterwards |
 | P4 | Cache on, no throttling. Visit Cover, go back to root, open Cover again | Second visit switches almost instantly; Network shows the image from memory or disk cache |
+| P5 | Open a portfolio whose icon is a very large photo (20+ megapixels), on a slower device such as a phone | The background switches in one step without a visible stall or a partly drawn image, and scrolling stays smooth while it switches |
 
 ### Unchanged background (no needless swaps)
 
@@ -90,7 +91,7 @@ overlap. Pick portfolios with different contents so you can tell them apart.
 |---|---|---|
 | U1 | Open Cover, then open **Twin** inside it | Background doesn't flicker; Network shows no new `/full` request for Twin |
 | U2 | Click the Cover breadcrumb from Twin | Same as U1: no flicker, no new `/full` request |
-| U3 | Open **Empty A**, then **Empty B** (or the reverse) | Gradient stays put with no flicker |
+| U3 | Open **Empty A**, then **Empty B** inside it | Gradient stays put with no flicker |
 | U4 | DevTools Elements: select `body`, open Empty A, then Empty B | The `style` attribute on `body` isn't rewritten (DevTools doesn't flash it) on the second step |
 
 ## Caching after deploys
