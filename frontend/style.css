@@ -13,8 +13,9 @@ body {
 }
 
 /* Page background image, set via the --page-bg-image custom property in
-   common.js (either a url(...) pointing at the root portfolio's icon image,
-   or a neutral gradient fallback when no icon is set). Rendered as its own
+   common.js (either a url(...) pointing at the open portfolio's icon image
+   -- the root's on the About page -- or a neutral gradient fallback when
+   there's no icon). Rendered as its own
    fixed full-viewport layer behind everything else, and kept heavily dimmed
    via a low opacity so it never competes with page content for readability.
    A separate layer (rather than applying background-image to body directly)

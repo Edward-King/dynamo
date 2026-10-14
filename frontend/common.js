@@ -82,36 +82,95 @@ function renderSiteHeader(activePage) {
     });
 }
 
-/**
- * Fetches the root portfolio from the proxy and applies its icon image
- * (full-resolution, since this is a large background rather than a small
- * tile) as a heavily-dimmed page background. Falls back to a neutral
- * gradient if there's no root icon or the proxy can't be reached --
- * background-image issues should never block the rest of the page from
- * working.
- */
-async function applyRootBackground() {
-    try {
-        const res = await fetch(`${PROXY_BASE_URL}/gallery/portfolios/root`);
-        if (!res.ok) throw new Error(`root portfolio request failed (${res.status})`);
-        const root = await res.json();
+// The --page-bg-image value currently on the page, so a request that would
+// set the same value again (e.g. two portfolios sharing one icon, or two
+// empty portfolios) leaves the page alone instead of re-downloading and
+// re-applying it.
+let currentBackgroundValue = null;
 
-        if (root.icon_image_id) {
-            const bgUrl = `${PROXY_BASE_URL}/gallery/image/${root.icon_image_id}/full`;
-            document.body.style.setProperty('--page-bg-image', `url("${bgUrl}")`);
-            document.body.classList.add('has-bg-image');
-            return;
+// Bumped by every background request. A request only applies its result if
+// it's still the newest one, so when the user clicks quickly through
+// portfolios a slow, older response can't overwrite a newer background.
+let backgroundRequestSeq = 0;
+
+function setPageBackground(value) {
+    if (value === currentBackgroundValue) return;
+    currentBackgroundValue = value;
+    document.body.style.setProperty('--page-bg-image', value);
+    document.body.classList.add('has-bg-image');
+}
+
+/**
+ * Downloads an image off-screen and resolves once it's ready, so the page
+ * can keep showing the old background until the new one can appear in one
+ * step (no blank or half-loaded frame in between). The request is made the
+ * same way the CSS background makes it (no CORS), so the browser reuses
+ * this download from cache when the background is applied.
+ */
+function preloadImage(url) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error(`could not load ${url}`));
+        img.src = url;
+    });
+}
+
+/**
+ * Fetches a portfolio from the proxy and applies its icon image
+ * (full-resolution, since this is a large background rather than a small
+ * tile) as a heavily-dimmed page background. `portfolioRef` is a portfolio
+ * ID, or 'root'. The icon is whatever PhotoShare resolved for the
+ * portfolio: its icon_dir image, otherwise its first image. Falls back to
+ * a neutral gradient if the portfolio has no icon (e.g. it's empty), or if
+ * the proxy or the image can't be reached -- background-image issues
+ * should never block the rest of the page from working. Never throws.
+ */
+async function applyPortfolioBackground(portfolioRef) {
+    const seq = ++backgroundRequestSeq;
+    let value = FALLBACK_BACKGROUND_CSS;
+
+    try {
+        const res = await fetch(`${PROXY_BASE_URL}/gallery/portfolios/${encodeURIComponent(portfolioRef)}`);
+        if (!res.ok) throw new Error(`portfolio request failed (${res.status})`);
+        const portfolio = await res.json();
+
+        if (portfolio.icon_image_id) {
+            const bgUrl = `${PROXY_BASE_URL}/gallery/image/${portfolio.icon_image_id}/full`;
+            const cssValue = `url("${bgUrl}")`;
+            // Already showing this image: nothing to download.
+            if (cssValue !== currentBackgroundValue) {
+                await preloadImage(bgUrl);
+            }
+            value = cssValue;
         }
     } catch (err) {
-        console.warn('Could not load root portfolio icon for background, using fallback.', err);
+        console.warn('Could not load portfolio icon for background, using fallback.', err);
     }
 
-    document.body.style.setProperty('--page-bg-image', FALLBACK_BACKGROUND_CSS);
-    document.body.classList.add('has-bg-image');
+    if (seq === backgroundRequestSeq) setPageBackground(value);
+}
+
+/**
+ * Applies the fallback gradient directly, for when the page can't even
+ * find out which portfolio to show (e.g. the proxy is down). Also cancels
+ * any background request still in flight.
+ */
+function applyFallbackBackground() {
+    backgroundRequestSeq += 1;
+    setPageBackground(FALLBACK_BACKGROUND_CSS);
+}
+
+/** The About page (and any page without a gallery) uses the root's icon. */
+function applyRootBackground() {
+    return applyPortfolioBackground('root');
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     const activePage = document.body.dataset.page || 'gallery';
     renderSiteHeader(activePage);
-    applyRootBackground();
+    // On the gallery, script.js sets the background for whichever
+    // portfolio is open (starting with root). Applying the root background
+    // here too would race it and could overwrite a sub-portfolio's image.
+    if (activePage !== 'gallery') applyRootBackground();
 });
