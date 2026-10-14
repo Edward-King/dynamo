@@ -3,13 +3,29 @@
 The proxy has an automated suite (`proxy/test_main.py`, run with `pytest`).
 The frontend doesn't, and the parts below depend on real browsers and
 devices (share sheets, the Photos app, download folders), so they're
-checked by hand. Run the full list when the lightbox, `script.js`, or
-`style.css` changes; run only the Download section for download-only
-changes.
+checked by hand. Run the full list when the lightbox, `common.js`,
+`script.js`, or `style.css` changes; run only the Download section for
+download-only changes, and only the Page background section for
+background-only changes.
 
 Before starting: proxy running, `PROXY_BASE_URL` in `common.js` pointing at
 it, and at least one portfolio with two or more photos (one with a
 non-ASCII name such as `Café.jpg` is useful).
+
+For the Page background section, also set up:
+
+- **Cover**: a portfolio whose `.photoshare_meta.json` sets `icon_dir`
+  to a photo that isn't its first one alphabetically (so you can tell the
+  two apart)
+- **Plain**: a portfolio with photos but no `icon_dir`
+- **Empty A**: a portfolio with no photos whose only content is
+  **Empty B**, a portfolio inside it that also has no photos
+- **Twin**: a portfolio inside Cover whose `icon_dir` points at Cover's
+  icon image (a path relative to the library root, e.g. `Cover/sunset.jpg`)
+
+Run a rescan after editing metadata. The background is dim on purpose, so
+compare it against the folder tile icons, or open the full image in
+DevTools (Elements > `body` > `--page-bg-image`).
 
 ## Download / Save
 
@@ -30,6 +46,53 @@ non-ASCII name such as `Café.jpg` is useful).
 | D13 | Any desktop browser | Open a photo, stop PhotoShare (leave the proxy running), click **Download** | No file is saved, and the gallery stays on screen with the lightbox open (it must not switch to an error page) |
 | D14 | Any desktop browser | Download the same photo twice, a few seconds apart | Two downloads (the second isn't silently ignored) |
 | D15 | iPad Safari with a trackpad or Magic Keyboard attached (button reads **Download**) | Open a photo, tap **Download** | Safari offers the file as a download (saved to Files), and the gallery stays on screen. This is the same download path iPhone falls back to if the share sheet can't open |
+
+## Page background
+
+| # | Check | Expected |
+|---|---|---|
+| B1 | Load the gallery | Background is the root portfolio's icon image (or its first photo if root has no `icon_dir`) |
+| B2 | Open **Cover** | Background changes to Cover's `icon_dir` photo, not its first photo |
+| B3 | Open **Plain** | Background changes to Plain's first photo |
+| B4 | Open **Empty A**, then **Empty B** | Empty A: background changes to the gray gradient. Empty B: gradient stays and "This portfolio is empty." shows as before (Empty A doesn't show it, because it contains Empty B) |
+| B5 | From a nested portfolio, click a breadcrumb back to root, then one level down | Each step shows that portfolio's background; root's is restored at root |
+| B6 | Open **About Me**, then go back to the gallery | About shows root's background; the gallery shows root's again |
+| B7 | DevTools Network tab: reload the gallery and filter for `portfolios` | One request to `/gallery/portfolios/root` (the gallery's own) plus one to `/gallery/portfolios/<root id>` (the background). There's no second `/gallery/portfolios/root` request |
+| B8 | Stop the proxy, reload the gallery; then reload About | Gallery shows the gradient and the "Could not reach the gallery proxy" message; About shows the gradient and its normal content |
+| B9 | With the gallery open, stop PhotoShare (leave the proxy running) and open a folder | Gradient background and the "Could not load" message; nothing else breaks. Start PhotoShare again and click a breadcrumb: backgrounds work again |
+| B10 | DevTools: throttle to **Slow 4G**. Open Cover, and before its background appears, click the root breadcrumb, then open Plain | Background ends on Plain's photo and stays there. It never flips to Cover's photo afterwards |
+
+### Fast navigation (folders and images)
+
+Use DevTools throttling (**Slow 4G**) so requests take long enough to
+overlap. Pick portfolios with different contents so you can tell them apart.
+
+| # | Check | Expected |
+|---|---|---|
+| N1 | Open Cover, and before its folders and photos appear, click the root breadcrumb | Root's folders and photos show and stay. Cover's never appear afterwards |
+| N2 | From root, open Plain, then quickly click the root breadcrumb and open Cover | Only Cover's folders and photos show at the end; the breadcrumb ends at root / Cover |
+| N3 | Open a large portfolio (more than 200 photos, so its photos load in pages), then click the root breadcrumb right away | Root's contents show. Network tab: requests for later pages of the large portfolio stop (at most one more page is requested) |
+| N4 | After N2, open a photo in the lightbox and use the arrow keys | The lightbox steps through Cover's photos, not Plain's |
+| N5 | Open Empty A, and before "This portfolio is empty." appears, click the root breadcrumb | Root's contents show; the empty message doesn't appear over them |
+
+### Smooth switching (preload)
+
+| # | Check | Expected |
+|---|---|---|
+| P1 | DevTools: leave **Disable cache** off, throttle to **Slow 4G**, and empty the cache (right-click reload > **Empty Cache and Hard Reload**). Open Cover | Root's background stays visible while Cover's image downloads, then Cover's replaces it in one step. No blank, gradient, or half-drawn frame in between |
+| P2 | Same as P1, Network tab, filter for `full` | Cover's full image is downloaded once (the preload). Any second entry for it is served from memory or disk cache, not downloaded again |
+| P3 | DevTools Network request blocking: add the pattern `*/full`. Open Plain | Background changes to the gradient (not stuck on the old image, not blank); folder icons and photo thumbnails still load. Remove the block afterwards |
+| P4 | Cache on, no throttling. Visit Cover, go back to root, open Cover again | Second visit switches almost instantly; Network shows the image from memory or disk cache |
+| P5 | Open a portfolio whose icon is a very large photo (20+ megapixels), on a slower device such as a phone | The background switches in one step without a visible stall or a partly drawn image, and scrolling stays smooth while it switches |
+
+### Unchanged background (no needless swaps)
+
+| # | Check | Expected |
+|---|---|---|
+| U1 | Open Cover, then open **Twin** inside it | Background doesn't flicker; Network shows no new `/full` request for Twin |
+| U2 | Click the Cover breadcrumb from Twin | Same as U1: no flicker, no new `/full` request |
+| U3 | Open **Empty A**, then **Empty B** inside it | Gradient stays put with no flicker |
+| U4 | DevTools Elements: select `body`, open Empty A, then Empty B | The `style` attribute on `body` isn't rewritten (DevTools doesn't flash it) on the second step |
 
 ## Caching after deploys
 
@@ -54,3 +117,4 @@ Run on the real server, through Apache (not a local static server). Replace
 | R4 | Tab through the lightbox with the keyboard | Download button gets a visible focus ring; Enter/Space activates it |
 | R5 | Phone layout (portrait) | Download and close buttons don't overlap; both easy to tap |
 | R6 | Page background and folder icons | Still load (the full-image responses gained a `Vary: Origin` header) |
+| R7 | Open a photo in the lightbox, then Save/Download it (D1, D6) in a portfolio that uses that same photo as its background | Works as before. The background and the lightbox share the full-image URL, one loaded without CORS and one with |

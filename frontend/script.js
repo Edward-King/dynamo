@@ -13,6 +13,9 @@
 //   GET  /gallery/image/{id}/full
 //   GET  /gallery/image/{id}/full?download=1   (saved as a file, real filename)
 //
+// The page background follows the open portfolio: loadPortfolio() asks
+// common.js to show that portfolio's icon image (or the fallback gradient).
+//
 // Navigation model: a breadcrumb trail of portfolios the user has drilled
 // into, starting at root. Clicking a folder tile pushes onto the trail and
 // re-fetches; clicking a breadcrumb entry truncates the trail back to that
@@ -32,6 +35,12 @@ let currentImages = [];
 let currentIndex = 0;
 let lastFocusedThumbnail = null;
 
+// Bumped by every loadPortfolio() call. A load only updates the page if
+// it's still the newest one, so when the user clicks quickly through
+// portfolios a slow, older response can't overwrite the folders, images,
+// or status message of the portfolio actually being shown.
+let portfolioLoadSeq = 0;
+
 const dom = {};
 
 // ---------------------------------------------------------------------------
@@ -47,7 +56,7 @@ async function fetchJSON(path) {
     return res.json();
 }
 
-async function fetchAllImages(portUuid) {
+async function fetchAllImages(portUuid, isCurrent = () => true) {
     // Walks pagination until has_next is false. Fine for personal-library
     // sized portfolios; page_size is already the proxy's max (200 per PhotoShare's
     // own server-side clamp).
@@ -56,7 +65,9 @@ async function fetchAllImages(portUuid) {
     while (true) {
         const data = await fetchJSON(`/gallery/portfolios/${portUuid}/images?page=${page}&page_size=200`);
         all = all.concat(data.items || []);
-        if (!data.has_next) break;
+        // Stop paging once a newer load has replaced this one; its results
+        // would be thrown away anyway.
+        if (!data.has_next || !isCurrent()) break;
         page += 1;
     }
     return all;
@@ -209,15 +220,26 @@ function setStatus(message, isError) {
 }
 
 async function loadPortfolio(portUuid, displayName) {
+    const seq = ++portfolioLoadSeq;
+    const isCurrent = () => seq === portfolioLoadSeq;
+
     setStatus('Loading\u2026', false);
     dom.folderGrid.innerHTML = '';
     dom.grid.innerHTML = '';
 
+    // Started separately and not awaited with the requests below, so a slow
+    // or failed background can't delay or break the folders and images.
+    applyPortfolioBackground(portUuid);
+
     try {
         const [children, images] = await Promise.all([
             fetchJSON(`/gallery/portfolios/${portUuid}/children`),
-            fetchAllImages(portUuid),
+            fetchAllImages(portUuid, isCurrent),
         ]);
+
+        // A newer load started while this one was waiting: leave the page
+        // to it.
+        if (!isCurrent()) return;
 
         renderFolders(children);
 
@@ -230,6 +252,9 @@ async function loadPortfolio(portUuid, displayName) {
             setStatus('', false);
         }
     } catch (err) {
+        // An outdated load failing must not put an error over the
+        // portfolio that's now open.
+        if (!isCurrent()) return;
         console.error(err);
         setStatus(
             `Could not load "${displayName}". Is the gallery proxy running at ${PROXY_BASE_URL}?`,
@@ -260,6 +285,7 @@ async function initGallery() {
         await loadPortfolio(root.id, root.name || 'Library');
     } catch (err) {
         console.error(err);
+        applyFallbackBackground();
         setStatus(
             `Could not reach the gallery proxy at ${PROXY_BASE_URL}. Make sure it's running.`,
             true
