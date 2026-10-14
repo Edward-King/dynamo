@@ -344,6 +344,19 @@ entirely if you only need access from the desktop itself.
   "Verify the deployment" in step 7. Check 1 compares against the repo
   directly, so it also catches a vhost that was already stale before this
   pull, which `git diff "$OLD"..HEAD` can't see.
+- **Frontend-only updates**, such as the per-portfolio background
+  ([PR #7](https://github.com/Edward-King/dynamo/pull/7)): the commands
+  above still apply, but `docker compose build` has nothing to rebuild and
+  `apache/` doesn't change, so copying and re-stamping the gallery files is
+  what puts the new code live. Confirm it:
+  ```bash
+  grep -c applyPortfolioBackground /var/www/photoshare-gallery/common.js /var/www/photoshare-gallery/script.js
+  #   expect: 1 or more for each file (0 means the old files are still deployed)
+  grep -o 'common.js?v=[0-9a-f]*' /var/www/photoshare-gallery/index.html /var/www/photoshare-gallery/about.html
+  #   expect: the same tag in both pages, different from before the update
+  ```
+  Then open [http://gallery.local](http://gallery.local) and click into a
+  portfolio: the dimmed background changes to that portfolio's icon image.
 - **Coming from an older unzipped bundle:** clone the repo as in step 2,
   copy your existing `.env` into it (compare with `.env.example` and add
   any missing variables), run `docker compose down` in the old folder,
