@@ -10,6 +10,7 @@ Covers every route currently exposed to the frontend:
   GET /gallery/image/{img_uuid}/thumb
   GET /gallery/image/{img_uuid}/full
   GET /gallery/image/{img_uuid}/full?download=1
+  GET /gallery/share?p={port_uuid}[&i={img_uuid}]
   GET /gallery/health
 
 All upstream (PhotoShare) calls are intercepted with respx so the suite
@@ -518,3 +519,308 @@ def test_cors_headers_present_for_frontend_origin(app):
     )
     assert resp.status_code in (200, 204)
     assert resp.headers.get("access-control-allow-origin") in ("*", "http://127.0.0.1:5500")
+
+
+# ---------------------------------------------------------------------------
+# /gallery/share -- link-preview page for shared albums and photos
+# ---------------------------------------------------------------------------
+
+import re  # noqa: E402
+
+import httpx  # noqa: E402
+
+ALBUM = "0b4f9c3e-1d2a-5e6f-8a9b-0c1d2e3f4a5b"
+PHOTO = "7c8d9e0f-1a2b-5c3d-9e4f-5a6b7c8d9e0f"
+COVER = "1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d"
+
+
+def _meta(body: str, prop: str) -> str | None:
+    """Content of <meta property=prop> or <meta name=prop>, unescaped."""
+    import html as _html
+
+    m = re.search(r'<meta (?:property|name)="' + re.escape(prop) + r'" content="([^"]*)">', body)
+    return _html.unescape(m.group(1)) if m else None
+
+
+def _mock_album(upstream_base, **fields):
+    data = {
+        "id": ALBUM,
+        "name": "Kyoto",
+        "icon_image_id": COVER,
+        "total_image_count": 24,
+    }
+    data.update(fields)
+    return respx.get(f"{upstream_base}/api/v2/portfolios/{ALBUM}").mock(
+        return_value=Response(200, json=data)
+    )
+
+
+def _mock_photo(upstream_base, **fields):
+    data = {"id": PHOTO, "name": "temple.jpg", "width": 4000, "height": 3000}
+    data.update(fields)
+    return respx.get(f"{upstream_base}/api/v2/images/{PHOTO}").mock(
+        return_value=Response(200, json=data)
+    )
+
+
+def _share(app, headers=None, **params):
+    client = TestClient(app, raise_server_exceptions=False)
+    base = {"host": "gallery.example.com", "x-forwarded-proto": "https"}
+    base.update(headers or {})
+    return client.get("/gallery/share", params=params, headers=base)
+
+
+@respx.mock
+def test_share_album_has_preview_tags(app, upstream_base):
+    _mock_album(upstream_base)
+    resp = _share(app, p=ALBUM)
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    body = resp.text
+    assert _meta(body, "og:title") == "Kyoto"
+    assert _meta(body, "og:description") == "Album \u00b7 24 photos"
+    assert _meta(body, "og:type") == "website"
+    assert _meta(body, "og:site_name") == "My Dynamic Gallery"
+    assert _meta(body, "og:url") == f"https://gallery.example.com/gallery/share?p={ALBUM}"
+    # The album's cover, as an absolute URL crawlers can fetch.
+    assert _meta(body, "og:image") == (
+        f"https://gallery.example.com/gallery/image/{COVER}/thumb?width=800&height=600"
+    )
+    assert _meta(body, "twitter:card") == "summary_large_image"
+    # The cover's size isn't looked up, so no size tags are claimed.
+    assert _meta(body, "og:image:width") is None
+
+
+@respx.mock
+def test_share_photo_uses_photo_and_album_name(app, upstream_base):
+    _mock_album(upstream_base)
+    _mock_photo(upstream_base)
+    resp = _share(app, p=ALBUM, i=PHOTO)
+
+    assert resp.status_code == 200
+    body = resp.text
+    assert _meta(body, "og:title") == "temple.jpg"
+    assert _meta(body, "og:description") == "Photo from Kyoto"
+    assert _meta(body, "og:url") == f"https://gallery.example.com/gallery/share?p={ALBUM}&i={PHOTO}"
+    assert _meta(body, "og:image") == (
+        f"https://gallery.example.com/gallery/image/{PHOTO}/thumb?width=800&height=600"
+    )
+    # 4000x3000 shrunk to fit 800x600.
+    assert _meta(body, "og:image:width") == "800"
+    assert _meta(body, "og:image:height") == "600"
+
+
+@respx.mock
+def test_share_photo_preview_size_keeps_shape_and_never_enlarges(app, upstream_base):
+    _mock_album(upstream_base)
+    _mock_photo(upstream_base, width=3000, height=4000)  # portrait
+    body = _share(app, p=ALBUM, i=PHOTO).text
+    assert (_meta(body, "og:image:width"), _meta(body, "og:image:height")) == ("450", "600")
+
+    respx.reset()
+    _mock_album(upstream_base)
+    _mock_photo(upstream_base, width=640, height=480)  # already small
+    body = _share(app, p=ALBUM, i=PHOTO).text
+    assert (_meta(body, "og:image:width"), _meta(body, "og:image:height")) == ("640", "480")
+
+
+@respx.mock
+def test_share_photo_lookups_run_concurrently(app, upstream_base):
+    import asyncio
+
+    album_started = asyncio.Event()
+    photo_started = asyncio.Event()
+
+    async def album_side_effect(request):
+        album_started.set()
+        await asyncio.wait_for(photo_started.wait(), timeout=2)
+        return Response(200, json={"id": ALBUM, "name": "Kyoto"})
+
+    async def photo_side_effect(request):
+        photo_started.set()
+        await asyncio.wait_for(album_started.wait(), timeout=2)
+        return Response(200, json={"id": PHOTO, "name": "temple.jpg"})
+
+    respx.get(f"{upstream_base}/api/v2/portfolios/{ALBUM}").mock(side_effect=album_side_effect)
+    respx.get(f"{upstream_base}/api/v2/images/{PHOTO}").mock(side_effect=photo_side_effect)
+    resp = _share(app, p=ALBUM, i=PHOTO)
+
+    assert resp.status_code == 200
+    assert _meta(resp.text, "og:title") == "temple.jpg"
+
+
+@respx.mock
+def test_share_album_without_cover_omits_image(app, upstream_base):
+    _mock_album(upstream_base, icon_image_id=None, total_image_count=0)
+    body = _share(app, p=ALBUM).text
+
+    assert _meta(body, "og:image") is None
+    assert _meta(body, "twitter:card") == "summary"
+    assert _meta(body, "og:description") == "Album"
+
+
+@respx.mock
+def test_share_single_photo_album_says_photo(app, upstream_base):
+    _mock_album(upstream_base, total_image_count=1)
+    assert _meta(_share(app, p=ALBUM).text, "og:description") == "Album \u00b7 1 photo"
+
+
+@respx.mock
+def test_share_sends_visitors_to_gallery(app, upstream_base):
+    _mock_album(upstream_base)
+    _mock_photo(upstream_base)
+    body = _share(app, p=ALBUM, i=PHOTO).text
+    target = f"../?p={ALBUM}&i={PHOTO}"
+
+    # A 200 page with a script hop, not an HTTP redirect, so crawlers keep
+    # the tags. The visible link covers browsers that block scripts.
+    assert f'<script>location.replace("{target}");</script>' in body
+    assert f'href="{target.replace("&", "&amp;")}"' in body
+    assert "http-equiv" not in body
+
+
+@respx.mock
+def test_share_album_link_targets_album_only(app, upstream_base):
+    _mock_album(upstream_base)
+    body = _share(app, p=ALBUM).text
+    assert f'location.replace("../?p={ALBUM}")' in body
+
+
+@respx.mock
+def test_share_escapes_names(app, upstream_base):
+    _mock_album(upstream_base, name='Tom & "Jerry" <script>alert(1)</script>')
+    _mock_photo(upstream_base, name="<img src=x onerror=alert(1)>.jpg")
+    body = _share(app, p=ALBUM, i=PHOTO).text
+
+    assert "<script>alert(1)" not in body
+    assert "<img src=x" not in body
+    assert "&lt;img src=x onerror=alert(1)&gt;.jpg" in body
+    assert _meta(body, "og:description") == 'Photo from Tom & "Jerry" <script>alert(1)</script>'
+    # Only the gallery's own script hop is on the page.
+    assert body.count("<script>") == 1
+
+
+def test_share_rejects_malformed_ids_without_calling_upstream(app):
+    # No respx routes: any upstream call would fail the test.
+    with respx.mock(assert_all_called=False) as mock:
+        for params in (
+            {},
+            {"p": "not-a-uuid"},
+            {"p": "../../admin"},
+            {"p": ALBUM, "i": "x"},
+            {"p": ALBUM, "i": ""},
+        ):
+            resp = _share(app, **params)
+            assert resp.status_code == 404, params
+            assert "This link isn&#x27;t valid." in resp.text
+            assert "location.replace" not in resp.text
+            assert 'href="../"' in resp.text
+        assert not mock.calls
+
+
+@respx.mock
+def test_share_unknown_album_is_friendly_404(app, upstream_base):
+    respx.get(f"{upstream_base}/api/v2/portfolios/{ALBUM}").mock(
+        return_value=Response(404, json={"error": "not found"})
+    )
+    resp = _share(app, p=ALBUM)
+
+    assert resp.status_code == 404
+    assert "This album isn&#x27;t available any more." in resp.text
+    assert "location.replace" not in resp.text
+    assert resp.headers["cache-control"] == "public, max-age=300"
+
+
+@respx.mock
+def test_share_unknown_photo_links_to_album(app, upstream_base):
+    _mock_album(upstream_base)
+    respx.get(f"{upstream_base}/api/v2/images/{PHOTO}").mock(
+        return_value=Response(404, json={"error": "not found"})
+    )
+    resp = _share(app, p=ALBUM, i=PHOTO)
+
+    assert resp.status_code == 404
+    assert "This photo isn&#x27;t available any more." in resp.text
+    assert f'href="../?p={ALBUM}"' in resp.text
+
+
+@respx.mock
+def test_share_uses_http_when_visitor_used_http(app, upstream_base):
+    _mock_album(upstream_base)
+    body = _share(app, headers={"host": "gallery.local", "x-forwarded-proto": "http"}, p=ALBUM).text
+    assert _meta(body, "og:image").startswith("http://gallery.local/gallery/image/")
+    assert _meta(body, "og:url").startswith("http://gallery.local/gallery/share")
+
+
+@respx.mock
+def test_share_keeps_host_port_and_ignores_unknown_proto(app, upstream_base):
+    _mock_album(upstream_base)
+    body = _share(
+        app, headers={"host": "192.168.1.20:8080", "x-forwarded-proto": "javascript"}, p=ALBUM
+    ).text
+    # Falls back to the scheme the proxy itself was reached on.
+    assert _meta(body, "og:url") == f"http://192.168.1.20:8080/gallery/share?p={ALBUM}"
+
+
+@respx.mock
+def test_share_bad_host_header_drops_absolute_urls(app, upstream_base):
+    _mock_album(upstream_base)
+    resp = _share(app, headers={"host": 'evil.example"><script>x</script>'}, p=ALBUM)
+
+    assert resp.status_code == 200
+    assert _meta(resp.text, "og:url") is None
+    assert _meta(resp.text, "og:image") is None
+    assert "evil.example" not in resp.text
+    # Still sends visitors on.
+    assert f'location.replace("../?p={ALBUM}")' in resp.text
+
+
+@respx.mock
+def test_share_slow_backend_still_sends_visitors_on(app, upstream_base):
+    respx.get(f"{upstream_base}/api/v2/portfolios/{ALBUM}").mock(
+        side_effect=httpx.ReadTimeout("slow")
+    )
+    resp = _share(app, p=ALBUM)
+
+    assert resp.status_code == 200
+    assert _meta(resp.text, "og:title") == "My Dynamic Gallery"
+    assert f'location.replace("../?p={ALBUM}")' in resp.text
+    # Not cached, so the next preview attempt can get the real one.
+    assert resp.headers["cache-control"] == "no-store"
+
+
+@respx.mock
+def test_share_backend_down_or_erroring_still_sends_visitors_on(app, upstream_base):
+    respx.get(f"{upstream_base}/api/v2/portfolios/{ALBUM}").mock(
+        side_effect=httpx.ConnectError("refused")
+    )
+    respx.get(f"{upstream_base}/api/v2/images/{PHOTO}").mock(return_value=Response(500))
+    resp = _share(app, p=ALBUM, i=PHOTO)
+
+    assert resp.status_code == 200
+    assert f'location.replace("../?p={ALBUM}&i={PHOTO}")' in resp.text
+    assert resp.headers["cache-control"] == "no-store"
+
+
+@respx.mock
+def test_share_success_is_cacheable_for_five_minutes(app, upstream_base):
+    _mock_album(upstream_base)
+    resp = _share(app, p=ALBUM)
+    assert resp.headers["cache-control"] == "public, max-age=300"
+
+
+@respx.mock
+def test_share_accepts_uppercase_ids(app, upstream_base):
+    _mock_album(upstream_base)
+    resp = _share(app, p=ALBUM.upper())
+    assert resp.status_code == 200
+    assert f"p={ALBUM}" in _meta(resp.text, "og:url")
+
+
+def test_site_name_env_override(monkeypatch):
+    import main
+
+    monkeypatch.setenv("GALLERY_PROXY_SITE_NAME", "Edward's Photos")
+    cfg = main._apply_env_overrides({"site_name": "My Dynamic Gallery"})
+    assert cfg["site_name"] == "Edward's Photos"
