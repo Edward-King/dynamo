@@ -199,13 +199,24 @@ body.has-bg-image::before {
     }
 }
 
-/* Breadcrumb navigation */
+/* Breadcrumb navigation, with the Share album button at the right end */
+.breadcrumb-bar {
+    display: -webkit-box;
+    display: flex;
+    -webkit-box-align: center;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 4px 20px;
+}
+
 .breadcrumb {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 6px;
-    padding: 8px 4px 20px;
+    -webkit-box-flex: 1;
+    flex: 1 1 auto;
+    min-width: 0;
     font-size: 0.95rem;
 }
 
@@ -234,6 +245,89 @@ body.has-bg-image::before {
 
 .breadcrumb .breadcrumb-sep {
     color: #999;
+}
+
+/* Folder above a linked album, known by name only (not clickable). */
+.breadcrumb .breadcrumb-text {
+    color: #555;
+    padding: 4px 6px;
+}
+
+.share-album-btn {
+    display: -webkit-inline-box;
+    display: inline-flex;
+    -webkit-box-align: center;
+    align-items: center;
+    gap: 6px;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid rgba(0, 0, 0, 0.18);
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.85);
+    color: #1a5fb4;
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* An author display rule would otherwise beat the hidden attribute. */
+.share-album-btn[hidden],
+.link-popover[hidden],
+.link-popover-hint[hidden] {
+    display: none;
+}
+
+.share-link-icon {
+    width: 20px;
+    height: 20px;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+}
+
+@media (hover: hover) {
+    .share-album-btn:hover {
+        background: #ffffff;
+    }
+}
+
+.share-album-btn:active {
+    background: #e8eef7;
+}
+
+.share-album-btn:focus-visible {
+    outline: 2px solid #1a5fb4;
+    outline-offset: 2px;
+}
+
+@media screen and (max-width: 600px) {
+    .share-album-btn {
+        width: 44px;
+        padding: 0;
+        -webkit-box-pack: center;
+        justify-content: center;
+    }
+
+    .share-album-btn span {
+        display: none;
+    }
+}
+
+/* "Go to the Library" under an "isn't available" message. */
+.status-action {
+    margin-left: 6px;
+    min-height: 44px;
+    padding: 0 16px;
+    border: 1px solid #1a5fb4;
+    border-radius: 22px;
+    background: #ffffff;
+    color: #1a5fb4;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
 }
 
 /* Status text (loading / error / empty) */
@@ -479,14 +573,21 @@ body.has-bg-image::before {
     visibility: hidden;
 }
 
-/* Download / Save button. Always visible (never hover-revealed) so it works
-   the same with touch, mouse, and keyboard. Sits left of the close button
-   with a clear gap so a tap meant for one doesn't hit the other. */
-.lightbox-download {
+/* Photo actions (Copy link, Download / Save). Always visible (never
+   hover-revealed) so they work the same with touch, mouse, and keyboard.
+   The row sits left of the close button with a clear gap so a tap meant for
+   one doesn't hit the other. */
+.lightbox-actions {
     position: absolute;
     top: 18px;
     right: 84px;
     z-index: 100000;
+    display: -webkit-box;
+    display: flex;
+    gap: 10px;
+}
+
+.lightbox-action {
     display: -webkit-inline-box;
     display: inline-flex;
     -webkit-box-align: center;
@@ -530,16 +631,16 @@ body.has-bg-image::before {
 /* Hover styling only on devices that really hover, so a tap on a phone
    doesn't leave the button stuck looking highlighted (Safari sticky hover). */
 @media (hover: hover) {
-    .lightbox-download:hover {
+    .lightbox-action:hover {
         background: rgba(255, 255, 255, 0.24);
     }
 }
 
-.lightbox-download:active {
+.lightbox-action:active {
     background: rgba(255, 255, 255, 0.3);
 }
 
-.lightbox-download:focus-visible {
+.lightbox-action:focus-visible {
     outline: 2px solid #ffffff;
     outline-offset: 2px;
 }
@@ -583,12 +684,105 @@ body.has-bg-image::before {
     background: rgba(140, 30, 30, 0.95);
 }
 
+/* The same notice outside the lightbox (album links). */
+.page-notice {
+    position: fixed;
+    z-index: 100001;
+}
+
+/* Box with the link selected, for pages that can't copy automatically. */
+.link-popover {
+    position: fixed;
+    left: 50%;
+    top: 96px;
+    z-index: 100002;
+    width: 480px;
+    max-width: calc(100vw - 24px);
+    padding: 16px 52px 16px 18px;
+    border-radius: 12px;
+    background: #ffffff;
+    color: #222222;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+    -webkit-transform: translateX(-50%);
+    transform: translateX(-50%);
+}
+
+.link-popover-title {
+    margin: 0 0 10px;
+    font-weight: 600;
+}
+
+.link-popover-row {
+    display: -webkit-box;
+    display: flex;
+    gap: 8px;
+}
+
+.link-popover-input {
+    -webkit-box-flex: 1;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 10px;
+    border: 1px solid #b8b8b8;
+    border-radius: 8px;
+    color: #222222;
+    background: #f7f7f7;
+    /* 16px stops iOS Safari zooming in when the box gets focus. */
+    font-size: 16px;
+}
+
+.link-popover-copy {
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    min-width: 72px;
+    min-height: 44px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 8px;
+    background: #1a5fb4;
+    color: #ffffff;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.link-popover-copy:focus-visible,
+.link-popover-close:focus-visible {
+    outline: 2px solid #1a5fb4;
+    outline-offset: 2px;
+}
+
+.link-popover-hint {
+    margin: 10px 0 0;
+    color: #555555;
+    font-size: 0.9rem;
+}
+
+.link-popover-close {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 44px;
+    height: 44px;
+    border: none;
+    background: transparent;
+    color: #555555;
+    font-size: 1.6rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
 /* Phones: icon only (the button keeps its aria-label for screen readers),
    and a 48px square to meet Android's touch-target guidance too. */
 @media screen and (max-width: 600px) {
-    .lightbox-download {
+    .lightbox-actions {
         top: 14px;
         right: 76px;
+        gap: 8px;
+    }
+
+    .lightbox-action {
         width: 48px;
         height: 48px;
         padding: 0;
@@ -601,7 +795,7 @@ body.has-bg-image::before {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .lightbox-download,
+    .lightbox-action,
     .lightbox-notice {
         -webkit-transition: none;
         transition: none;

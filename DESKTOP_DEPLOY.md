@@ -189,6 +189,9 @@ versions after each update:
 ```bash
 sudo mkdir -p /var/www/photoshare-gallery /var/www/photoshare-admin
 sudo cp frontend/{index.html,about.html,script.js,style.css,common.js} /var/www/photoshare-gallery/
+# Per-server settings (share-link address): copied only the first time,
+# so your edits survive updates. Never overwrite it.
+[ -e /var/www/photoshare-gallery/site-config.js ] || sudo cp frontend/site-config.js /var/www/photoshare-gallery/
 sudo python3 frontend/stamp_assets.py /var/www/photoshare-gallery
 sudo cp -r admin-frontend/* /var/www/photoshare-admin/
 ```
@@ -271,7 +274,8 @@ name` warning. It's harmless, and `2>/dev/null` hides it.)
 
 ```bash
 grep -c '?v=' /var/www/photoshare-gallery/index.html
-#   expect: 3   (0 means stamp_assets.py wasn't run on this copy)
+#   expect: 4   (0 means stamp_assets.py wasn't run on this copy;
+#                3 means site-config.js is missing from the web root)
 stat -c 'on disk: %s bytes' /var/www/photoshare-gallery/index.html
 curl -sI http://gallery.local/ | grep -iE '^(cache-control|content-length):' \
   || echo "no Cache-Control/Content-Length in reply -- see table below"
@@ -297,6 +301,41 @@ Re-run all three checks after any fix.
 Open a photo and use the lightbox's Download button to save it with its
 original filename (press `D` as a shortcut). `frontend/TESTING.md` has the
 full manual checklist, including phones.
+
+### Sharing links
+
+**Copy link** in the lightbox (shortcut `L`) and **Share album** above the
+folders hand out a link to the photo or album. Because this setup is plain
+HTTP, the browser can't copy automatically: a box opens with the link
+selected and a **Copy** button. The box also says who the link works for:
+
+- `http://gallery.local` or `localhost`: only this computer. Another
+  device resolves `gallery.local` to itself, not to this machine.
+- A LAN address or name (see the next section): only devices on your
+  home network that use the same address or hosts entry.
+
+To share with people outside, you need a public address that reaches this
+machine (for example a router port-forward with a dynamic-DNS name, or a
+tunnel such as Cloudflare Tunnel or Tailscale Funnel), and its name as a
+`ServerAlias` in the gallery vhost. Then set it in
+`/var/www/photoshare-gallery/site-config.js`:
+
+```js
+    shareBaseUrl: 'https://photos.example.net',
+```
+
+and re-run `sudo python3 frontend/stamp_assets.py /var/www/photoshare-gallery`
+(browsers keep tagged files for a year, so the tag must change). Deploys
+never overwrite `site-config.js`. Shared links then always start with that
+address, and the "only works on" note goes away.
+
+Links go through a small preview page in `data-proxy` (`/gallery/share`)
+that gives chat apps the album or photo name and a picture. Apps that
+build the preview on the sender's phone (iMessage, WhatsApp, Signal) show
+it whenever that phone can reach the gallery. Apps that build it on their
+own servers (Slack, Discord, Facebook) show it only with a public address
+as above. Without a preview, the link still works for anyone who can reach
+the gallery.
 
 ## Optional: LAN access from other devices
 
@@ -332,6 +371,7 @@ entirely if you only need access from the desktop itself.
   git pull --ff-only
   docker compose build && docker compose up -d
   sudo cp frontend/{index.html,about.html,script.js,style.css,common.js} /var/www/photoshare-gallery/
+  [ -e /var/www/photoshare-gallery/site-config.js ] || sudo cp frontend/site-config.js /var/www/photoshare-gallery/
   sudo python3 frontend/stamp_assets.py /var/www/photoshare-gallery
   sudo cp -r admin-frontend/* /var/www/photoshare-admin/
   git diff "$OLD"..HEAD -- apache/   # any vhost changes?
@@ -357,6 +397,22 @@ entirely if you only need access from the desktop itself.
   ```
   Then open [http://gallery.local](http://gallery.local) and click into a
   portfolio: the dimmed background changes to that portfolio's icon image.
+- **Share links** ([PR #9](https://github.com/Edward-King/dynamo/pull/9))
+  change both the gallery and `data-proxy`, so `docker compose build && docker
+  compose up -d` is required this time (it adds the `/gallery/share`
+  preview page; without it shared links open `{"detail":"Not Found"}`).
+  The update commands above also add `site-config.js` the first time.
+  Confirm it:
+  ```bash
+  grep -c shareCurrentPhoto /var/www/photoshare-gallery/script.js
+  #   expect: 1 or more
+  ROOT_ID=$(curl -s http://gallery.local/gallery/portfolios/root | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+  curl -s "http://gallery.local/gallery/share?p=$ROOT_ID" | grep -o '<meta property="og:title" content="[^"]*"'
+  #   expect: og:title with your library's name
+  ```
+  Optional: `GALLERY_PROXY_SITE_NAME` in `.env` sets the site name in
+  previews, and **Preheat thumbnails** in the admin UI with width `800`,
+  height `600` makes previews faster. See "Sharing links" in step 8.
 - **Coming from an older unzipped bundle:** clone the repo as in step 2,
   copy your existing `.env` into it (compare with `.env.example` and add
   any missing variables), run `docker compose down` in the old folder,

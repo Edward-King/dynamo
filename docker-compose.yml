@@ -45,6 +45,7 @@ services:
       - GALLERY_PROXY_API_KEY=${GALLERY_PROXY_API_KEY:?set GALLERY_PROXY_API_KEY in .env -- see CLOUD_DEPLOY.md}
       - GALLERY_PROXY_BASE_URL=http://backend:8000
       - GALLERY_PROXY_CORS_ORIGINS=${GALLERY_PROXY_CORS_ORIGINS:-}
+      - GALLERY_PROXY_SITE_NAME=${GALLERY_PROXY_SITE_NAME:-}
     depends_on:
       backend:
         condition: service_healthy

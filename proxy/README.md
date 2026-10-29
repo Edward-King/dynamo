@@ -47,6 +47,7 @@ from a file:
 | `GALLERY_PROXY_HOST` | `proxy_host` | No (default `127.0.0.1`; use `0.0.0.0` in a container) |
 | `GALLERY_PROXY_PORT` | `proxy_port` | No (default `8100`) |
 | `GALLERY_PROXY_CORS_ORIGINS` | `cors_allow_origins` | No (comma-separated, e.g. `https://example.com,https://a.example.com`) |
+| `GALLERY_PROXY_SITE_NAME` | `site_name` | No (default `My Dynamic Gallery`; shown in share-link previews) |
 
 Environment variables always win over `config.json` when both are set, so
 you can still keep a `config.json` for local dev and override just the key
@@ -72,6 +73,29 @@ at deploy time. See the accompanying `Dockerfile`, which deliberately does
    Then open `http://127.0.0.1:5500` in your browser.
 
 If the frontend's status area shows a "could not reach the gallery proxy" message, check that step 2's server is running and that `PROXY_BASE_URL` at the top of `script.js` matches your `proxy_port`.
+
+## Share-link previews
+
+`GET /gallery/share?p=<album id>[&i=<photo id>]` is the address the
+gallery's **Copy link** / **Share album** buttons hand out. It answers
+with a small HTML page carrying Open Graph tags (album or photo name, a
+description, and an 800x600 thumbnail as `og:image`) so chat and social
+apps can draw a preview card, then sends visitors on to the gallery
+(`../?p=...&i=...`) with one line of JavaScript. It's a `200` page rather
+than a redirect because preview crawlers follow redirects and would then
+only see the gallery's untagged page.
+
+- Absolute URLs in the tags are built from the request's `Host` header and
+  `X-Forwarded-Proto`, which the Apache2 vhost provides
+  (`ProxyPreserveHost On`). A `Host` that isn't a plain host name (with an
+  optional port) is ignored and those tags are left out.
+- IDs must be UUIDs; anything else, or an album or photo PhotoShare doesn't
+  know, gets a friendly "isn't available" page with status `404`.
+- If PhotoShare is down or slow (lookups give up after 5 seconds), the page
+  still sends visitors on, with a plain preview and `Cache-Control:
+  no-store`. Normal pages are cached for 5 minutes (`public, max-age=300`).
+- Names are HTML-escaped. The page has no API key or PhotoShare address in
+  it.
 
 ## Why a proxy at all?
 

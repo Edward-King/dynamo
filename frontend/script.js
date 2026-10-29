@@ -13,6 +13,9 @@
 //   GET  /gallery/image/{id}/full
 //   GET  /gallery/image/{id}/full?download=1   (saved as a file, real filename)
 //
+// Share buttons hand out /gallery/share?p=<album>[&i=<photo>] links: a small
+// proxy page with link-preview tags that sends people on to this page.
+//
 // The page background follows the open portfolio: loadPortfolio() asks
 // common.js to show that portfolio's icon image (or the fallback gradient).
 //
@@ -21,6 +24,12 @@
 // re-fetches; clicking a breadcrumb entry truncates the trail back to that
 // point and re-fetches. Images in the *current* portfolio populate both the
 // grid and the lightbox's navigable set.
+//
+// Addresses: the address bar follows what's on screen -- ?p=<album id> for
+// an album (nothing at the root) plus &i=<photo id> while a photo is open --
+// so Back/Forward, reloading and pasting the address all work. Opening an
+// album or a photo adds a history entry; stepping between photos replaces
+// it, so Back leaves the photo viewer in one step.
 // ---------------------------------------------------------------------------
 
 // PROXY_BASE_URL is declared once in common.js (loaded before this file on
@@ -28,6 +37,9 @@
 // stay pointed at the same proxy without risking the two constants drifting.
 
 // Ordered list of {id, name} the user has navigated through, root first.
+// An entry with id null is a folder name shown as plain text: an album
+// opened from a link knows the names of the folders above it (from its
+// path) but not their IDs.
 let breadcrumbTrail = [];
 
 // Images currently loaded for the active portfolio (drives the lightbox).
@@ -51,7 +63,9 @@ async function fetchJSON(path) {
     const res = await fetch(`${PROXY_BASE_URL}${path}`);
     if (!res.ok) {
         const body = await res.text();
-        throw new Error(`Request to ${path} failed (${res.status}): ${body}`);
+        const err = new Error(`Request to ${path} failed (${res.status}): ${body}`);
+        err.status = res.status;
+        throw err;
     }
     return res.json();
 }
@@ -83,16 +97,24 @@ function renderBreadcrumb() {
     breadcrumbTrail.forEach((node, index) => {
         const isLast = index === breadcrumbTrail.length - 1;
 
-        const btn = document.createElement('button');
-        btn.textContent = node.name;
-        btn.type = 'button';
-        if (isLast) {
-            btn.setAttribute('aria-current', 'true');
-            btn.disabled = true;
+        if (!node.id && !isLast) {
+            // Folder known only by name (see breadcrumbTrail): not clickable.
+            const text = document.createElement('span');
+            text.className = 'breadcrumb-text';
+            text.textContent = node.name;
+            dom.breadcrumb.appendChild(text);
         } else {
-            btn.addEventListener('click', () => navigateToTrailIndex(index));
+            const btn = document.createElement('button');
+            btn.textContent = node.name;
+            btn.type = 'button';
+            if (isLast) {
+                btn.setAttribute('aria-current', 'true');
+                btn.disabled = true;
+            } else {
+                btn.addEventListener('click', () => navigateToTrailIndex(index));
+            }
+            dom.breadcrumb.appendChild(btn);
         }
-        dom.breadcrumb.appendChild(btn);
 
         if (!isLast) {
             const sep = document.createElement('span');
@@ -219,6 +241,9 @@ function setStatus(message, isError) {
     dom.status.classList.toggle('error', Boolean(isError));
 }
 
+// Resolves true once this portfolio is on screen, or false if it failed or
+// a newer load replaced it (so callers know whether it's safe to open a
+// photo from it).
 async function loadPortfolio(portUuid, displayName) {
     const seq = ++portfolioLoadSeq;
     const isCurrent = () => seq === portfolioLoadSeq;
@@ -239,7 +264,7 @@ async function loadPortfolio(portUuid, displayName) {
 
         // A newer load started while this one was waiting: leave the page
         // to it.
-        if (!isCurrent()) return;
+        if (!isCurrent()) return false;
 
         renderFolders(children);
 
@@ -251,39 +276,213 @@ async function loadPortfolio(portUuid, displayName) {
         } else {
             setStatus('', false);
         }
+        updateShareAlbumButton();
+        return true;
     } catch (err) {
         // An outdated load failing must not put an error over the
         // portfolio that's now open.
-        if (!isCurrent()) return;
+        if (!isCurrent()) return false;
         console.error(err);
         setStatus(
             `Could not load "${displayName}". Is the gallery proxy running at ${PROXY_BASE_URL}?`,
             true
         );
+        updateShareAlbumButton(false);
+        return false;
     }
+}
+
+function currentPortfolio() {
+    return breadcrumbTrail[breadcrumbTrail.length - 1] || null;
 }
 
 async function enterPortfolio(portUuid, name) {
     breadcrumbTrail.push({ id: portUuid, name });
     renderBreadcrumb();
+    recordHistory('push');
     await loadPortfolio(portUuid, name);
 }
 
 async function navigateToTrailIndex(index) {
     breadcrumbTrail = breadcrumbTrail.slice(0, index + 1);
     renderBreadcrumb();
-    const node = breadcrumbTrail[breadcrumbTrail.length - 1];
+    recordHistory('push');
+    const node = currentPortfolio();
     await loadPortfolio(node.id, node.name);
 }
 
-async function initGallery() {
-    setStatus('Loading\u2026', false);
+// ---------------------------------------------------------------------------
+// Address bar and history
+// ---------------------------------------------------------------------------
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// True while the open lightbox has its own history entry (opened by a click
+// here, or by Forward). Closing it then goes Back one entry instead of
+// leaving a duplicate album entry behind. False when the photo came straight
+// from a link, where there's no earlier entry to go back to.
+let lightboxHasHistoryEntry = false;
+
+// The photo shown in the lightbox, or null when it's closed.
+function openImageId() {
+    if (!isLightboxOpen()) return null;
+    const item = currentImages[currentIndex];
+    return item ? item.id : null;
+}
+
+// The page address for an album and, optionally, a photo in it. Root is
+// the plain page address. Other query parameters are kept.
+function galleryAddress(albumId, imageId) {
+    const params = new URLSearchParams(window.location.search);
+    params.delete('p');
+    params.delete('i');
+    const root = breadcrumbTrail[0];
+    if (albumId && !(root && root.id === albumId && !imageId)) params.set('p', albumId);
+    if (albumId && imageId) params.set('i', imageId);
+    const query = params.toString();
+    return `${window.location.pathname}${query ? `?${query}` : ''}`;
+}
+
+// mode: 'push' adds an entry, 'replace' rewrites the current one.
+function recordHistory(mode, imageId) {
+    const node = currentPortfolio();
+    if (!node || !window.history || !history.pushState) return;
+    const image = imageId === undefined ? openImageId() : imageId;
+    const state = { gallery: true, trail: breadcrumbTrail.slice(), image: image || null };
     try {
-        const root = await fetchJSON('/gallery/portfolios/root');
-        breadcrumbTrail = [{ id: root.id, name: root.name || 'Library' }];
-        renderBreadcrumb();
-        await loadPortfolio(root.id, root.name || 'Library');
+        if (mode === 'push') history.pushState(state, '', galleryAddress(node.id, image));
+        else history.replaceState(state, '', galleryAddress(node.id, image));
     } catch (err) {
+        // Safari limits how often the address can change (e.g. very fast
+        // swiping); the address just lags behind. Never worth breaking for.
+        console.warn('Could not update the address bar.', err);
+    }
+}
+
+function readAddress() {
+    const params = new URLSearchParams(window.location.search);
+    return { albumId: params.get('p'), imageId: params.get('i') };
+}
+
+// Open a photo of the album on screen by ID, if it's there.
+function openImageById(imageId, hasHistoryEntry) {
+    const index = currentImages.findIndex((item) => item.id === imageId);
+    if (index < 0) return false;
+    openLightbox(index, dom.grid.children[index], { history: 'none' });
+    lightboxHasHistoryEntry = hasHistoryEntry;
+    return true;
+}
+
+function showUnavailable(message) {
+    // Message plus a way back to the Library.
+    setStatus(message, false);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'status-action';
+    button.textContent = 'Go to the Library';
+    button.addEventListener('click', () => navigateToTrailIndex(0));
+    dom.status.appendChild(document.createTextNode(' '));
+    dom.status.appendChild(button);
+}
+
+// Back/Forward: show whatever the entry describes.
+async function onHistoryNavigation(event) {
+    const state = event.state;
+    if (!state || !state.gallery || !Array.isArray(state.trail) || !state.trail.length) {
+        // An entry this page didn't make (e.g. a typed address): read it.
+        if (isLightboxOpen()) closeLightbox({ history: 'none' });
+        await openFromAddress();
+        return;
+    }
+    const target = state.trail[state.trail.length - 1];
+    const node = currentPortfolio();
+    if (!node || node.id !== target.id) {
+        if (isLightboxOpen()) closeLightbox({ history: 'none' });
+        breadcrumbTrail = state.trail.slice();
+        renderBreadcrumb();
+        const loaded = await loadPortfolio(target.id, target.name);
+        if (loaded && state.image && !openImageById(state.image, true)) {
+            setStatus("This photo isn't available any more.", false);
+        }
+        return;
+    }
+    // Same album: only the photo changed.
+    if (!state.image) {
+        if (isLightboxOpen()) closeLightbox({ history: 'none' });
+    } else if (openImageId() !== state.image) {
+        const index = currentImages.findIndex((item) => item.id === state.image);
+        if (index < 0) return;
+        if (isLightboxOpen()) {
+            currentIndex = index;
+            updateLightboxContent();
+        } else {
+            openImageById(state.image, true);
+        }
+    }
+}
+
+// Show the album (and photo) named in the address. Used on first load and
+// for history entries this page didn't create.
+async function openFromAddress() {
+    const { albumId, imageId } = readAddress();
+    setStatus('Loading\u2026', false);
+    const startSeq = portfolioLoadSeq;
+    try {
+        if (!albumId) {
+            const root = await fetchJSON('/gallery/portfolios/root');
+            if (portfolioLoadSeq !== startSeq) return;
+            breadcrumbTrail = [{ id: root.id, name: root.name || 'Library' }];
+            renderBreadcrumb();
+            recordHistory('replace', null);
+            await loadPortfolio(root.id, root.name || 'Library');
+            return;
+        }
+
+        // An album link: the album itself, plus root for the Library
+        // breadcrumb. Root's photos aren't loaded and its background isn't
+        // shown, so the album's background is the first one to appear.
+        const valid = UUID_PATTERN.test(albumId);
+        const [root, album] = await Promise.all([
+            fetchJSON('/gallery/portfolios/root'),
+            valid ? fetchJSON(`/gallery/portfolios/${albumId}`).catch((err) => {
+                if (err.status === 400 || err.status === 404 || err.status === 422) return null;
+                throw err;
+            }) : Promise.resolve(null),
+        ]);
+        if (portfolioLoadSeq !== startSeq) return;
+        const rootNode = { id: root.id, name: root.name || 'Library' };
+
+        if (!album) {
+            breadcrumbTrail = [rootNode];
+            renderBreadcrumb();
+            applyPortfolioBackground(root.id);
+            showUnavailable("This album isn't available any more.");
+            updateShareAlbumButton(false);
+            return;
+        }
+
+        breadcrumbTrail = [rootNode];
+        if (album.id !== root.id) {
+            // Folder names between the Library and the album, from its path
+            // (e.g. "Travel/Japan/Kyoto" -> Travel, Japan). Virtual albums
+            // have no folders of their own, so nothing is added for them.
+            const parts = album.virtual ? [] : String(album.rel_path || '').split('/')
+                .filter((part) => part && part !== '.');
+            parts.slice(0, -1).forEach((name) => breadcrumbTrail.push({ id: null, name }));
+            breadcrumbTrail.push({ id: album.id, name: album.name || 'Album' });
+        }
+        renderBreadcrumb();
+        const node = currentPortfolio();
+        const loaded = await loadPortfolio(node.id, node.name);
+        if (!loaded) return;
+        if (imageId && openImageById(imageId, false)) {
+            recordHistory('replace', imageId);
+        } else {
+            recordHistory('replace', null);
+            if (imageId) setStatus("This photo isn't available any more.", false);
+        }
+    } catch (err) {
+        if (portfolioLoadSeq !== startSeq) return;
         console.error(err);
         applyFallbackBackground();
         setStatus(
@@ -293,12 +492,18 @@ async function initGallery() {
     }
 }
 
+function initGallery() {
+    return openFromAddress();
+}
+
 // ---------------------------------------------------------------------------
 // Lightbox (unchanged behavior from the static version: swipe, keyboard,
 // focus management -- just re-pointed at currentImages/proxy URLs)
 // ---------------------------------------------------------------------------
 
-function openLightbox(index, triggerEl) {
+// options.history: 'push' (default) gives the open photo its own history
+// entry; 'none' leaves history alone (the caller handles it).
+function openLightbox(index, triggerEl, options = {}) {
     currentIndex = index;
     lastFocusedThumbnail = triggerEl || document.activeElement;
     updateLightboxContent();
@@ -306,6 +511,11 @@ function openLightbox(index, triggerEl) {
     dom.lightbox.style.display = 'flex';
     document.body.style.overflow = 'hidden';
     dom.closeBtn.focus();
+
+    if (options.history !== 'none') {
+        recordHistory('push');
+        lightboxHasHistoryEntry = true;
+    }
 }
 
 function updateLightboxContent() {
@@ -328,11 +538,26 @@ function updateLightboxContent() {
     prepareShareFile(item);
 }
 
-function closeLightbox() {
+// options.history: 'auto' (default) takes the photo out of the address;
+// 'none' when Back/Forward already did.
+function closeLightbox(options = {}) {
+    const wasOpen = isLightboxOpen();
     dom.lightbox.style.display = 'none';
     document.body.style.overflow = '';
     releaseShareFile();
     hideNotice();
+    closeLinkPopover(false);
+
+    if (wasOpen && options.history !== 'none') {
+        if (lightboxHasHistoryEntry) {
+            // Return to the album's own entry, so Back afterwards leaves the
+            // album rather than reopening the photo.
+            history.back();
+        } else {
+            recordHistory('replace', null);
+        }
+    }
+    lightboxHasHistoryEntry = false;
 
     if (lastFocusedThumbnail) {
         const thumbnail = lastFocusedThumbnail;
@@ -383,6 +608,7 @@ function navigateLightbox(direction) {
     if (currentImages.length === 0) return;
     currentIndex = (currentIndex + direction + currentImages.length) % currentImages.length;
     updateLightboxContent();
+    recordHistory('replace');
 }
 
 function isLightboxOpen() {
@@ -429,14 +655,18 @@ let noticeTimer = null;
 // throwing, so the rest of the gallery keeps working.
 let downloadAvailable = false;
 
+// Touch-first only: an iPad with a trackpad or a touchscreen laptop with a
+// mouse reports hover support and is treated like a desktop.
+function isTouchFirst() {
+    if (!window.matchMedia) return false;
+    return window.matchMedia('(pointer: coarse)').matches &&
+        !window.matchMedia('(hover: hover)').matches;
+}
+
 function detectShareMode() {
     if (typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') return false;
     if (typeof File !== 'function' || !window.matchMedia) return false;
-    // Touch-first only: an iPad with a trackpad or a touchscreen laptop with a
-    // mouse reports hover support and gets the normal file download.
-    const touchFirst = window.matchMedia('(pointer: coarse)').matches &&
-        !window.matchMedia('(hover: hover)').matches;
-    if (!touchFirst) return false;
+    if (!isTouchFirst()) return false;
     try {
         return navigator.canShare({ files: [new File([''], 'probe.jpg', { type: 'image/jpeg' })] });
     } catch (_) {
@@ -501,18 +731,24 @@ function setDownloadBusy(busy) {
     dom.downloadBtn.setAttribute('aria-busy', busy ? 'true' : 'false');
 }
 
+// Shows in the lightbox while it's open, otherwise at the bottom of the page.
+// Longer messages (e.g. with a "home network only" hint) stay up longer.
 function showNotice(message, isError) {
     clearTimeout(noticeTimer);
-    if (!dom.lightboxNotice) return;
-    dom.lightboxNotice.textContent = message;
-    dom.lightboxNotice.classList.toggle('is-error', !!isError);
-    dom.lightboxNotice.classList.add('is-visible');
-    noticeTimer = setTimeout(hideNotice, isError ? 4000 : 2500);
+    hideNotice();
+    const el = isLightboxOpen() ? dom.lightboxNotice : dom.pageNotice;
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('is-error', !!isError);
+    el.classList.add('is-visible');
+    const base = isError ? 4000 : 2500;
+    noticeTimer = setTimeout(hideNotice, message.length > 40 ? base + 2500 : base);
 }
 
 function hideNotice() {
     clearTimeout(noticeTimer);
     if (dom.lightboxNotice) dom.lightboxNotice.classList.remove('is-visible');
+    if (dom.pageNotice) dom.pageNotice.classList.remove('is-visible');
 }
 
 // How long a download frame is kept before it's removed. Removing it while
@@ -622,6 +858,246 @@ function configureDownloadButton() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Share links
+//
+// "Copy link" in the photo viewer and "Share album" above the folders hand
+// out a link to what's on screen. What happens is chosen by what the browser
+// can do, never by looking at the address:
+//
+//   * Touch-first devices with a share sheet (secure pages only): the system
+//     share sheet opens with the link.
+//   * Other secure pages (HTTPS, or localhost): the link is copied and
+//     "Link copied" shows.
+//   * Plain-HTTP pages (e.g. http://gallery.local or a home-network address)
+//     can't use either, so a small box shows the link already selected,
+//     with a Copy button.
+//
+// Links point at the proxy's /gallery/share page, which gives chat apps a
+// preview (name and photo) and then opens this page at the album or photo.
+// They start with shareBaseUrl from site-config.js when it's set, otherwise
+// with this page's own address.
+// ---------------------------------------------------------------------------
+
+// True once the photo viewer's share button and its label are in the page;
+// the album button and the copy box are optional (see bootstrap).
+let shareLinkAvailable = false;
+let shareBusy = false;
+let linkPopoverOpener = null;
+let shareBaseWarned = false;
+
+// Share sheet for links: needs only navigator.share (no file support).
+function linkShareSheetAvailable() {
+    return window.isSecureContext === true && typeof navigator.share === 'function' && isTouchFirst();
+}
+
+function clipboardAvailable() {
+    return window.isSecureContext === true && !!navigator.clipboard &&
+        typeof navigator.clipboard.writeText === 'function';
+}
+
+// { base, configured }: where share links start, without a trailing slash.
+function shareBase() {
+    const config = window.PHOTOSHARE_SITE_CONFIG;
+    const raw = config && typeof config.shareBaseUrl === 'string' ? config.shareBaseUrl.trim() : '';
+    if (raw) {
+        try {
+            const url = new URL(raw);
+            if ((url.protocol === 'https:' || url.protocol === 'http:') && !url.search && !url.hash &&
+                !url.username && !url.password) {
+                return { base: `${url.origin}${url.pathname.replace(/\/+$/, '')}`, configured: true };
+            }
+        } catch (_) { /* reported below */ }
+        if (!shareBaseWarned) {
+            shareBaseWarned = true;
+            console.warn(`site-config.js: shareBaseUrl "${raw}" isn't an http:// or https:// address; using this page's address instead.`);
+        }
+    }
+    // This page's folder, so a gallery under a path prefix keeps it.
+    const folder = window.location.pathname.replace(/[^/]*$/, '').replace(/\/+$/, '');
+    return { base: `${window.location.origin}${folder}`, configured: false };
+}
+
+function shareUrl(albumId, imageId) {
+    const { base } = shareBase();
+    const query = `p=${encodeURIComponent(albumId)}${imageId ? `&i=${encodeURIComponent(imageId)}` : ''}`;
+    // The preview page lives on the proxy. With PROXY_BASE_URL pointing at
+    // another origin (local development without Apache) it isn't under
+    // this address, so hand out the plain gallery address instead.
+    if (PROXY_BASE_URL) return `${base}/?${query}`;
+    return `${base}/gallery/share?${query}`;
+}
+
+// Private and loopback addresses work only on this computer or this
+// network. Returns a hint for the person sharing, or '' (also when
+// shareBaseUrl is set: then the owner has chosen the address).
+function shareReachHint() {
+    if (shareBase().configured) return '';
+    const host = window.location.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    // U+2060 after the hyphen keeps "site-config.js" from wrapping there.
+    const where = ' To share it further, set shareBaseUrl in site-\u2060config.js.';
+    if (host === 'localhost' || host.endsWith('.localhost') || /^127\./.test(host) || host === '::1') {
+        return `This link only works on this computer.${where}`;
+    }
+    const privateV4 = /^(10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
+    const privateV6 = /^(fe80:|fc|fd)/.test(host) && host.includes(':');
+    const localName = /\.(local|lan|home|internal|home\.arpa)$/.test(host) ||
+        (!host.includes('.') && !host.includes(':'));
+    if (privateV4 || privateV6 || localName) {
+        return `This link only works on your home network.${where}`;
+    }
+    return '';
+}
+
+async function copyOrShareLink(url, title, opener) {
+    if (shareBusy) return;
+    const hint = shareReachHint();
+    if (linkShareSheetAvailable()) {
+        shareBusy = true;
+        try {
+            await navigator.share({ url, title });
+            if (hint) showNotice(hint);
+            return;
+        } catch (err) {
+            // Closed without choosing: nothing to report.
+            if (err && err.name === 'AbortError') return;
+            // Anything else: fall through to copying.
+            console.warn('Share sheet unavailable; copying instead.', err);
+        } finally {
+            shareBusy = false;
+        }
+    }
+    if (clipboardAvailable()) {
+        try {
+            await navigator.clipboard.writeText(url);
+            showNotice(hint ? `Link copied. ${hint}` : 'Link copied');
+            return;
+        } catch (err) {
+            console.warn('Could not copy automatically; showing the link instead.', err);
+        }
+    }
+    openLinkPopover(url, hint, opener);
+}
+
+function openLinkPopover(url, hint, opener) {
+    if (!dom.linkPopover) {
+        // Older cached page without the box: the browser's own prompt still
+        // shows the link selected.
+        window.prompt('Copy this link:', url);
+        return;
+    }
+    hideNotice();
+    linkPopoverOpener = opener || document.activeElement;
+    dom.linkPopoverInput.value = url;
+    dom.linkPopoverHint.textContent = hint;
+    dom.linkPopoverHint.hidden = !hint;
+    dom.linkPopoverCopy.textContent = 'Copy';
+    dom.linkPopover.hidden = false;
+    selectPopoverLink();
+}
+
+function selectPopoverLink() {
+    const input = dom.linkPopoverInput;
+    input.focus();
+    input.select();
+    // iOS Safari ignores select() on its own.
+    try { input.setSelectionRange(0, input.value.length); } catch (_) { /* not supported */ }
+    // Show the start of the link (selecting scrolls to its end).
+    input.scrollLeft = 0;
+}
+
+function isLinkPopoverOpen() {
+    return !!dom.linkPopover && !dom.linkPopover.hidden;
+}
+
+function closeLinkPopover(restoreFocus = true) {
+    if (!isLinkPopoverOpen()) return;
+    dom.linkPopover.hidden = true;
+    const opener = linkPopoverOpener;
+    linkPopoverOpener = null;
+    if (restoreFocus && opener && typeof opener.focus === 'function' && document.contains(opener)) {
+        opener.focus();
+    }
+}
+
+function copyPopoverLink() {
+    const input = dom.linkPopoverInput;
+    // iOS Safari won't copy from a read-only box, so it's editable for the
+    // moment of the copy only.
+    input.readOnly = false;
+    selectPopoverLink();
+    let copied = false;
+    try {
+        // The older copy command works on plain-HTTP pages, where the
+        // clipboard API isn't available.
+        copied = document.execCommand('copy');
+    } catch (_) {
+        copied = false;
+    }
+    input.readOnly = true;
+    if (copied) {
+        dom.linkPopoverCopy.textContent = 'Copied';
+    } else {
+        // Leave the link selected for Ctrl+C / Cmd+C or long-press > Copy.
+        dom.linkPopoverCopy.textContent = isTouchFirst() ? 'Long-press to copy' : 'Press Ctrl+C';
+        if (/Mac|iPhone|iPad/.test(navigator.platform || '') && !isTouchFirst()) {
+            dom.linkPopoverCopy.textContent = 'Press \u2318C';
+        }
+    }
+}
+
+function shareCurrentPhoto() {
+    const item = currentImages[currentIndex];
+    const node = currentPortfolio();
+    if (!shareLinkAvailable || !item || !node || !node.id) return;
+    copyOrShareLink(shareUrl(node.id, item.id), item.name || item.alternate_name || 'Photo', dom.shareLinkBtn);
+}
+
+function shareCurrentAlbum() {
+    const node = currentPortfolio();
+    if (!node || !node.id) return;
+    copyOrShareLink(shareUrl(node.id, null), node.name || 'Album', dom.shareAlbumBtn);
+}
+
+// Shown once an album is on screen; hidden while there's nothing to share.
+function updateShareAlbumButton(visible = true) {
+    if (!dom.shareAlbumBtn) return;
+    const node = currentPortfolio();
+    dom.shareAlbumBtn.hidden = !(visible && node && node.id);
+    if (dom.shareAlbumLabel) {
+        dom.shareAlbumLabel.textContent = breadcrumbTrail.length <= 1 ? 'Share gallery' : 'Share album';
+    }
+    dom.shareAlbumBtn.setAttribute('aria-label', breadcrumbTrail.length <= 1 ? 'Share gallery link' : 'Share album link');
+}
+
+function configureShareButton() {
+    const sheet = linkShareSheetAvailable();
+    dom.shareLinkLabel.textContent = sheet ? 'Share link' : 'Copy link';
+    dom.shareLinkBtn.setAttribute('aria-label', sheet ? 'Share link to this photo' : 'Copy link to this photo');
+    dom.shareLinkBtn.title = sheet ? 'Share link' : 'Copy link (L)';
+}
+
+function initLinkPopover() {
+    dom.linkPopoverCopy.addEventListener('click', copyPopoverLink);
+    dom.linkPopoverClose.addEventListener('click', () => closeLinkPopover());
+    dom.linkPopover.addEventListener('keydown', (e) => {
+        // Keys typed here are for the box only (not the photo viewer or the
+        // site menu underneath).
+        e.stopPropagation();
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            closeLinkPopover();
+        }
+    });
+    // Tapping or clicking anywhere else closes it.
+    document.addEventListener('pointerdown', (e) => {
+        if (isLinkPopoverOpen() && !dom.linkPopover.contains(e.target) &&
+            !(linkPopoverOpener && linkPopoverOpener.contains && linkPopoverOpener.contains(e.target))) {
+            closeLinkPopover(false);
+        }
+    });
+}
+
 function initSwipeGestures() {
     let touchStartX = 0;
     const SWIPE_THRESHOLD = 40;
@@ -659,6 +1135,16 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.downloadBtn = document.getElementById('downloadBtn');
     dom.downloadLabel = document.getElementById('downloadLabel');
     dom.lightboxNotice = document.getElementById('lightboxNotice');
+    dom.pageNotice = document.getElementById('pageNotice');
+    dom.shareLinkBtn = document.getElementById('shareLinkBtn');
+    dom.shareLinkLabel = document.getElementById('shareLinkLabel');
+    dom.shareAlbumBtn = document.getElementById('shareAlbumBtn');
+    dom.shareAlbumLabel = document.getElementById('shareAlbumLabel');
+    dom.linkPopover = document.getElementById('linkPopover');
+    dom.linkPopoverInput = document.getElementById('linkPopoverInput');
+    dom.linkPopoverCopy = document.getElementById('linkPopoverCopy');
+    dom.linkPopoverHint = document.getElementById('linkPopoverHint');
+    dom.linkPopoverClose = document.getElementById('linkPopoverClose');
 
     if (!dom.grid || !dom.lightbox) return;
 
@@ -668,7 +1154,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     dom.prevBtn.addEventListener('click', (e) => { e.stopPropagation(); navigateLightbox(-1); });
     dom.nextBtn.addEventListener('click', (e) => { e.stopPropagation(); navigateLightbox(1); });
-    dom.closeBtn.addEventListener('click', closeLightbox);
+    dom.closeBtn.addEventListener('click', () => closeLightbox());
     downloadAvailable = !!(dom.downloadBtn && dom.downloadLabel && dom.lightboxNotice);
     if (downloadAvailable) {
         dom.downloadBtn.addEventListener('click', (e) => { e.stopPropagation(); handleDownload(); });
@@ -678,19 +1164,45 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn('Download button not found in the page; download is unavailable until the page is reloaded.');
     }
 
+    // Share links. Like Download, each part switches itself off if an older
+    // cached page doesn't have its markup.
+    if (!(dom.linkPopover && dom.linkPopoverInput && dom.linkPopoverCopy &&
+          dom.linkPopoverHint && dom.linkPopoverClose)) {
+        dom.linkPopover = null;
+    } else {
+        initLinkPopover();
+    }
+    shareLinkAvailable = !!(dom.shareLinkBtn && dom.shareLinkLabel);
+    if (shareLinkAvailable) {
+        dom.shareLinkBtn.addEventListener('click', (e) => { e.stopPropagation(); shareCurrentPhoto(); });
+        configureShareButton();
+    } else {
+        console.warn('Share link button not found in the page; photo links are unavailable until the page is reloaded.');
+    }
+    if (dom.shareAlbumBtn) {
+        dom.shareAlbumBtn.addEventListener('click', shareCurrentAlbum);
+    }
+
     initSwipeGestures();
 
     document.addEventListener('keydown', (e) => {
         if (!isLightboxOpen()) return;
+        const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
         if (e.key === 'ArrowLeft') navigateLightbox(-1);
         else if (e.key === 'ArrowRight') navigateLightbox(1);
         else if (e.key === 'Escape') closeLightbox();
-        else if ((e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        else if ((e.key === 'd' || e.key === 'D') && plain) {
             // Plain D only -- Ctrl/Cmd+D is the browser's bookmark shortcut.
             e.preventDefault();
             handleDownload();
+        } else if ((e.key === 'l' || e.key === 'L') && plain) {
+            // Plain L only -- Ctrl/Cmd+L moves to the address bar.
+            e.preventDefault();
+            shareCurrentPhoto();
         }
     });
+
+    window.addEventListener('popstate', onHistoryNavigation);
 
     initGallery();
 });

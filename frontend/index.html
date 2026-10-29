@@ -11,8 +11,17 @@
 
 <div class="page-content">
 
-    <!-- Breadcrumb trail for portfolio navigation -->
-    <nav id="breadcrumb" class="breadcrumb" aria-label="Portfolio path"></nav>
+    <!-- Breadcrumb trail for portfolio navigation, with the album's share
+         button at the right end (hidden until an album has loaded). -->
+    <div class="breadcrumb-bar">
+        <nav id="breadcrumb" class="breadcrumb" aria-label="Portfolio path"></nav>
+        <button id="shareAlbumBtn" class="share-album-btn" type="button" aria-label="Share album link" title="Share a link to this album" hidden>
+            <svg class="share-link-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M10 14a4.5 4.5 0 0 0 6.4 0l3.2-3.2a4.5 4.5 0 0 0-6.4-6.4L11.6 6M14 10a4.5 4.5 0 0 0-6.4 0l-3.2 3.2a4.5 4.5 0 0 0 6.4 6.4l1.6-1.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span id="shareAlbumLabel">Share album</span>
+        </button>
+    </div>
 
     <!-- Sub-portfolio ("folder") tiles -->
     <div id="folderGrid" class="cross-browser-grid folder-grid"></div>
@@ -28,20 +37,33 @@
 <div id="lightbox" class="lightbox-modal" role="dialog" aria-modal="true" aria-label="Image viewer">
     <button id="closeBtn" class="lightbox-close" aria-label="Close">&times;</button>
 
-    <!-- Download / Save. Label and icon are switched by script.js:
-         "Download" (tray icon) on desktop and on devices without a share
-         sheet; "Save" (share icon) on touch devices that can share files,
-         where it opens the system share sheet ("Save Image" to Photos on
-         iOS). The text label is hidden on narrow screens -- see style.css. -->
-    <button id="downloadBtn" class="lightbox-download" type="button" aria-label="Download image" title="Download (D)">
-        <svg class="lightbox-download-icon icon-download" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M12 3v12m0 0l-5-5m5 5l5-5M4 17v3h16v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <svg class="lightbox-download-icon icon-share" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M12 15V3m0 0L8 7m4-4l4 4M7 10H5v11h14V10h-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <span id="downloadLabel" class="lightbox-download-label">Download</span>
-    </button>
+    <!-- Photo actions, side by side left of the close button. -->
+    <div class="lightbox-actions">
+        <!-- Copy link / Share link: hands out a link to the photo on screen.
+             "Share link" opens the system share sheet on touch devices; see
+             script.js. Text label hidden on narrow screens. -->
+        <button id="shareLinkBtn" class="lightbox-action lightbox-share" type="button" aria-label="Copy link to this photo" title="Copy link (L)">
+            <svg class="lightbox-download-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M10 14a4.5 4.5 0 0 0 6.4 0l3.2-3.2a4.5 4.5 0 0 0-6.4-6.4L11.6 6M14 10a4.5 4.5 0 0 0-6.4 0l-3.2 3.2a4.5 4.5 0 0 0 6.4 6.4l1.6-1.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span id="shareLinkLabel" class="lightbox-download-label">Copy link</span>
+        </button>
+
+        <!-- Download / Save. Label and icon are switched by script.js:
+             "Download" (tray icon) on desktop and on devices without a share
+             sheet; "Save" (share icon) on touch devices that can share files,
+             where it opens the system share sheet ("Save Image" to Photos on
+             iOS). The text label is hidden on narrow screens -- see style.css. -->
+        <button id="downloadBtn" class="lightbox-action lightbox-download" type="button" aria-label="Download image" title="Download (D)">
+            <svg class="lightbox-download-icon icon-download" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 3v12m0 0l-5-5m5 5l5-5M4 17v3h16v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <svg class="lightbox-download-icon icon-share" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 15V3m0 0L8 7m4-4l4 4M7 10H5v11h14V10h-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span id="downloadLabel" class="lightbox-download-label">Download</span>
+        </button>
+    </div>
 
     <!-- Short-lived feedback for download/save ("Download started", errors). -->
     <div id="lightboxNotice" class="lightbox-notice" role="status" aria-live="polite"></div>
@@ -53,6 +75,25 @@
     <div id="lightboxCaption" class="lightbox-caption"></div>
 </div>
 
+<!-- Shown when a link can't be copied automatically (plain-HTTP setups):
+     the link is selected in a box with a Copy button. Outside the lightbox
+     so it works for both photo and album links. -->
+<div id="linkPopover" class="link-popover" role="dialog" aria-modal="false" aria-labelledby="linkPopoverTitle" hidden>
+    <p id="linkPopoverTitle" class="link-popover-title">Copy this link</p>
+    <div class="link-popover-row">
+        <input id="linkPopoverInput" class="link-popover-input" type="text" readonly aria-labelledby="linkPopoverTitle" spellcheck="false" autocomplete="off">
+        <button id="linkPopoverCopy" class="link-popover-copy" type="button">Copy</button>
+    </div>
+    <p id="linkPopoverHint" class="link-popover-hint"></p>
+    <button id="linkPopoverClose" class="link-popover-close" type="button" aria-label="Close">&times;</button>
+</div>
+
+<!-- Short notices outside the lightbox ("Link copied" for albums). -->
+<div id="pageNotice" class="lightbox-notice page-notice" role="status" aria-live="polite"></div>
+
+<!-- Per-server settings (public address for share links). Deploys never
+     overwrite it; see site-config.js. Loaded first so every script can use it. -->
+<script src="site-config.js"></script>
 <script src="common.js"></script>
 <script src="script.js"></script>
 

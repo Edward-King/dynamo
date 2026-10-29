@@ -139,6 +139,9 @@ sudo mkdir -p /var/www/photoshare-gallery /var/www/photoshare-admin
 # Gallery: copy only the site files (not TESTING.md or the stamping tool),
 # then tag the CSS/JS links so browsers pick up new versions after deploys.
 sudo cp frontend/{index.html,about.html,script.js,style.css,common.js} /var/www/photoshare-gallery/
+# Per-server settings (share-link address): copied only the first time,
+# so your edits survive updates. Never overwrite it.
+[ -e /var/www/photoshare-gallery/site-config.js ] || sudo cp frontend/site-config.js /var/www/photoshare-gallery/
 sudo python3 frontend/stamp_assets.py /var/www/photoshare-gallery
 sudo cp -r admin-frontend/* /var/www/photoshare-admin/
 
@@ -215,10 +218,26 @@ curl -sI "https://gallery.example.com/$TAGGED" | grep -i cache-control
 If the first `curl` shows no `Cache-Control` header, the caching rules are
 missing from the HTTPS vhost (`photoshare-gallery-le-ssl.conf`).
 
+Check the share-link preview page (it lives in `data-proxy`, so it needs
+no vhost change):
+
+```bash
+ROOT_ID=$(curl -s https://gallery.example.com/gallery/portfolios/root | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+curl -s "https://gallery.example.com/gallery/share?p=$ROOT_ID" | grep -o '<meta property="og:[a-z:]*" content="[^"]*"'
+#   expect: og:title, og:url and (if the library has photos) og:image lines,
+#           with URLs starting https://gallery.example.com/
+```
+
+A `{"detail":"Not Found"}` reply means `data-proxy` wasn't rebuilt. Share
+previews load faster once the 800x600 preview thumbnails exist: in the
+admin UI, run **Preheat thumbnails** with width `800`, height `600` and
+the library root (they're also made on first use).
+
 Then load both hostnames in a browser and confirm the gallery renders your
 real photo library and the admin UI's health badge is green. Open a photo
 and use the lightbox's Download button (on a phone, Save should open the
-share sheet). `frontend/TESTING.md` has the full manual checklist.
+share sheet), then **Copy link** and paste the link into a new tab.
+`frontend/TESTING.md` has the full manual checklist.
 
 ## Updating an existing deployment
 
@@ -278,11 +297,13 @@ you'll need to issue new API keys (step 4).
    refresh.
    ```bash
    sudo cp frontend/{index.html,about.html,script.js,style.css,common.js} /var/www/photoshare-gallery/
+   [ -e /var/www/photoshare-gallery/site-config.js ] || sudo cp frontend/site-config.js /var/www/photoshare-gallery/
    sudo python3 frontend/stamp_assets.py /var/www/photoshare-gallery
    sudo cp -r admin-frontend/* /var/www/photoshare-admin/
    ```
    Plain `cp` (not `rsync --delete`) keeps server-only files in the web root,
-   such as your own About-page photo. If you skip stamping, nothing breaks;
+   such as your own About-page photo. `site-config.js` is copied only if
+   it's missing, so your settings in it are kept. If you skip stamping, nothing breaks;
    untagged files are just re-checked on every visit.
 3. **Apply any vhost changes by hand.** Your installed vhosts have your
    real `ServerName` and certbot's additions, so don't overwrite them with
@@ -343,6 +364,38 @@ page background follow the open portfolio. It changes only the gallery's
   Then open the gallery and click into a portfolio: the dimmed background
   changes to that portfolio's icon image. The Page background section of
   `frontend/TESTING.md` has the full checklist.
+
+### Upgrading to share links
+
+[PR #9](https://github.com/Edward-King/dynamo/pull/9) adds **Copy link** in
+the lightbox and **Share album** above the folders, keeps the address bar
+in step with the open album and photo, and adds a preview page in
+`data-proxy` (`/gallery/share`) so chat apps show the album or photo name
+and a picture:
+
+- Step 1 matters this time: `docker compose build` rebuilds `data-proxy`
+  with the new `/gallery/share` route and `up -d` restarts it. Without it,
+  every shared link opens a `{"detail":"Not Found"}` page. The backend and
+  admin proxy don't change.
+- Step 2 copies the new gallery files, adds the new `site-config.js` (first
+  time only) and re-tags everything.
+- Step 3: nothing to do. `git diff "$OLD"..HEAD -- apache/` prints nothing;
+  `/gallery/` is already passed to `data-proxy`.
+- Optional: `GALLERY_PROXY_SITE_NAME` in `.env` sets the site name shown in
+  previews (default `My Dynamic Gallery`); run `docker compose up -d`
+  after changing it. `site-config.js` can stay as it is: on a public HTTPS
+  host, links already use the address in the browser. Set its
+  `shareBaseUrl` only if visitors use a different public address than the
+  one you share from, and re-run `stamp_assets.py` after editing it.
+- Optional: preheat the 800x600 preview thumbnails (see step 7).
+- Confirm with the share-page check in step 7, then:
+  ```bash
+  grep -c shareCurrentPhoto /var/www/photoshare-gallery/script.js
+  #   expect: 1 or more (0 means the old script is still deployed)
+  ```
+  Open a photo, click **Copy link**, paste it into a new tab: the same
+  photo opens. The Share links and Link previews sections of
+  `frontend/TESTING.md` have the full checklist.
 
 ## Ongoing operations
 
